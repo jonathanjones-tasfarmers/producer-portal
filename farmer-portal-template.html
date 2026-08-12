@@ -1,0 +1,1955 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- 8/12 polish pass — this is a private, unlisted per-farmer link (see
+     "Private link — not for sharing" in the header), so it should never
+     turn up in a search engine even if a link leaks. theme-color tints
+     mobile browser chrome (address bar) to match the masthead navy, a
+     small but genuine bit of polish on phone-sized screens, where most
+     farmers will actually open this link. -->
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#041221">
+<title>Producer portal | Low Emissions Livestock trial</title>
+<!--
+  LEL Producer Portal — reusable per-farm template.
+
+  This is the "farmer-portal-template.html" referenced in Phase 4 of the
+  2026-07-22 LEL Multi-Farm Rollout Action Checklist: one file, farm
+  selected via a ?farm= URL query parameter, no login. The link itself is
+  the access control — per the checklist, don't publish this URL anywhere
+  public, hand each farmer their own link directly, e.g.:
+    farmer-portal-template.html?farm=Bowood%20Farm
+    farmer-portal-template.html?farm=Eastbourne%20Farm
+    farmer-portal-template.html?farm=TRT%20Pastoral
+  No ?farm= present defaults to Bowood Farm (today's only live farm).
+
+  Endpoints, field names and calculation logic below are copied from the
+  live public site (page-2-farms.html / page-5-data.html / farms-
+  illustrative-carbon-value.html / page-7-calculator.html) wherever this
+  page needs the same figure, so this portal can't disagree with the
+  public pages the way the ADG figure once did across pages (see page-2-
+  farms.html's 4/8 fix note) — same formulas, same data-source-of-truth
+  choices, just farm-filtered instead of trial-wide where a farm_name
+  field is available to filter on.
+
+  Design tokens, fonts (Tahoma/Verdana) and Chart.js version (4.4.4 via
+  jsDelivr) copied from page-5-data.html for visual consistency with the
+  rest of the site, even though this page isn't embedded in the Hub —
+  it's a good habit if Jono ever wants to bring it in as a Hub-hosted
+  page later.
+
+  8/10 pass — FULL REDESIGN from the farmer's perspective (Jono's request:
+  "analyse it from the farmer's perspective, what do they want to see
+  first, what needs to stand out"). Previous layout was ordered by how the
+  features were BUILT (KPIs, then charts, then reorder tool bolted on at
+  the bottom, then the calculator bolted on after that) rather than by
+  what a producer actually opens this link to find out. Reordered around
+  three questions a farmer actually has, in the order they'd ask them:
+
+    1. "Is it working for my animals?" — ADG advantage is the single
+       clearest yes/no signal, so it's now the biggest number on the page
+       (widened KPI card, larger type) and leads the KPI row, ahead of
+       current weight and cost. Methane abatement — the trial's actual
+       purpose — stays in the KPI row but last among the four, since it's
+       the trial's story more than the farmer's own day-to-day question.
+    2. "Do I need to DO anything right now?" — the lick block reorder
+       forecast moved from near the bottom of the page to right after the
+       KPI row, since it's the only genuinely actionable, time-sensitive
+       item here (miss a reorder date and the trial stalls on that farm).
+       A conditional alert banner now sits above EVERYTHING, including the
+       KPI row, if either treatment is overdue or out of stock — an
+       exception like that shouldn't be waiting below a scroll's worth of
+       otherwise-fine numbers to be seen.
+    3. "How do I compare, and what's the trend?" — the farm-vs-trial
+       comparison and the four trend charts come next, for anyone who
+       wants to verify the headline numbers or see the shape of the data
+       over time, not just today's snapshot.
+    4. "What's my contribution, and what if I scaled this up?" — cumulative
+       abatement (the feel-good, big-picture number) and the economic
+       feasibility calculator (a deliberate, occasional planning tool, not
+       a daily-glance figure) close out the page.
+
+  Added light "eyebrow" section labels (`.pp-section-label`) between these
+  groups purely for wayfinding — the page reads top-to-bottom in priority
+  order now rather than as one long undifferentiated stack of cards, and a
+  first-time visitor scanning down it should be able to tell at a glance
+  which group of cards they're looking at.
+
+  Also harmonised colour: kpi-adg's ahead/behind colouring and the reorder
+  card's "overdue" state were still using the CSS-derived --tf-mint-600 /
+  --tf-coral-500 tones (a slightly different, softer mint and an orange-
+  leaning "red") instead of the page's actual MINT/RED accent hexes
+  (#3aa989 / #c0392b) used everywhere else — same inconsistency already
+  fixed on the calculator's result colour earlier today, now applied
+  everywhere so "ahead" and "behind" read as the exact same two colours no
+  matter which card they appear on (dashboard-design skill principle #2).
+  Added --tf-red as a proper CSS variable for the one remaining CSS-only
+  (non-JS) usage.
+
+  No functional/data changes in this pass — every fetch, formula, and
+  fallback below is untouched, this is a structure and colour-consistency
+  pass only. See each function's own header comment for its own history.
+
+  LIVE-DATA STATUS (checked directly against the real feature services,
+  6/8 — see git history / chat for the full verification trail):
+  - Current weight, ADG vs control, cost of production: confirmed working
+    against real Bowood Farm rows on OptiWeigh_Cattle_Weights and
+    LEL_Economics_Data (farm_name backfill has been run).
+  - Methane abatement: farm-filtered as of 8/8 — LEL_Emissions_Data_view
+    now exposes farm_name (see the 8/8 pt.4 note below), falls back to the
+    trial aggregate the same way Economics/Cost already do.
+  - Lick block usage: confirmed working against LEL_Lick_Block_Usage_History
+    (append-only, built up by 02. LEL_Lick_Block_Tracker_v2.py since 10/8)
+    and LEL_Lick_Block_Orders (Jono edits directly in ArcGIS Online).
+  All fetches are plain unauthenticated client-side calls, same pattern as
+  the rest of the public site — no login, no API key, so this file is
+  ready to host as-is once it's pushed somewhere reachable (Jono's
+  producer-portal GitHub repo).
+
+  8/8 pass (Jono's request — "why is the ADG trend so far behind"): found
+  the ADG trend chart was on an entirely different, unrelated methodology
+  to the ADG vs control KPI card sitting right above it — the KPI already
+  used LEL_Economics_Data's date-paired formula, but the chart below it was
+  still reading OptiWeigh_Cattle_Weights/rolling_adg as two raw per-
+  treatment lines (a leftover from before page-5-data.html's own 4/8
+  unification pass). That's a much noisier, independently-computed number
+  (live-checked: latest rolling_adg readings for Bowood Farm were SeaFeed
+  943 g/day vs Control 639 g/day, swinging day to day — nothing like the
+  smoother Economics-based advantage line), so of course the two disagreed.
+  Rewrote fetchAdgHistory() to match page-5-data.html's chart exactly (see
+  that function's own comment for the full formula) — this chart, the KPI
+  card, and the Farm page badge now all read the same number.
+  Also found and fixed a real data-alignment bug in the cost-of-production
+  trend chart: it built one deduped label list from both treatments
+  combined, then plotted each treatment's own filtered values in their own
+  order against those shared labels — silently mismatched whenever the two
+  treatments didn't share every date. Rebuilt keyed by calculation_date.
+  Added spanGaps:true as the default for every chart on this page (in
+  lineChart()) so a genuinely missing reading doesn't break the line
+  visually — belt-and-braces alongside the ADG chart's inner join, which
+  already can't produce a gap by construction.
+  ADG KPI card: added a %-based reframing ("SeaFeed growing X% faster than
+  Control") and a widening/narrowing trend line, using the same paired
+  history the chart plots — see that block's own comment (superseded 8/10,
+  see below — the note/detail lines were later dropped and the figure
+  itself became the %).
+
+  8/8 pass, part 2 (Jono's request — full visual redesign using the new
+  tasfarmers-lel-dashboard-design skill, plus two data additions):
+  - Applied the skill's patterns throughout: the KPI number is always the
+    heaviest thing on its card; the whole page now uses exactly three
+    colours with fixed meaning — MINT (#3aa989, matches page-5-data.html)
+    for SeaFeed identity AND "good/ahead", SLATE (#a9b8c4) for Control
+    identity and everything neutral, RED (#c0392b) only for "behind/bad"
+    — replacing several one-off hex values that didn't match any of those
+    (e.g. the old weight-trend green #1D9E75, lick-block green #639922,
+    and using coral for the SeaFeed cost line, which wrongly implied
+    SeaFeed=bad). Every card now shares the same radius/padding/shadow
+    (see the shared `.pp-kpi-card, .pp-card, .pp-cumulative-card` rule) —
+    previously the cumulative card had different padding to everything
+    else. Chart axis borders switched off and gridlines lightened further
+    (Chart.js shows an axis border by default even when the grid line
+    itself is hidden). Added one deliberate contrast zone — the header is
+    now a solid navy band (masthead) against the light body, rather than
+    varying tone card-by-card without a structural reason.
+  - Weight trend chart now plots SeaFeed AND Control (fetchWeightHistory()
+    was SeaFeed-only) — the Current Weight KPI already splits both
+    treatments since the 7/8 pass, so the trend chart below it showing
+    only one told a different story to the KPI above it. Same date-keyed
+    join pattern as the cost trend chart, for the same gap-safety reason.
+  - Cost of production KPI is now split SeaFeed vs Control (Jono's
+    request), matching the Current Weight card's layout — was previously
+    SeaFeed-only despite both treatments already being fetched.
+  - Lick block bars now sort by consumption (highest first) rather than
+    whatever order the service returns — no natural category order to
+    preserve, so sorting by magnitude is more readable per the skill's
+    chart-type guidance. (Superseded 8/10 — this chart was later rebuilt
+    entirely as a line-over-time chart, see that pass's note.)
+  - Cumulative abatement card now shows total CO2-e (tonnes, GWP100 basis)
+    as its own stat between the raw kg CH4 figure and the illustrative $
+    value (Jono's request) — this number already existed in the illustrative-
+    value maths but was never shown on its own, only baked into the dollar
+    figure at the end.
+
+  8/8 pt.3 (Jono's request): colour every KPI value that IS SeaFeed's own
+  reading #3aa989 (new --tf-seafeed var, same hex as the chart JS's MINT
+  constant), Control left unchanged. Applied to the Current Weight and Cost
+  of Production split values, and to Methane Abatement (that whole KPI is
+  sourced from treatment='seafeed' — there's no Control counterpart shown,
+  so the full value gets the colour, not just half a split card). Did NOT
+  colour the split "SeaFeed" caption labels (kept muted, matching every
+  other card label on the page) or the Cumulative Abatement card's three
+  big numbers (also SeaFeed-sourced, but that card is a different "hero
+  summary" style with its own large navy figures, not a side-by-side split
+  — recolouring all three felt like it would fight the page's
+  one-accent-colour rule rather than serve it). Also left kpi-adg and the
+  "farm vs trial average" bar untouched — both are computed deltas between
+  treatments, not a SeaFeed reading on its own, so they keep their existing
+  direction-based (ahead/behind) colouring instead of a treatment-identity
+  colour. Flagged both calls for Jono to override if he wants it broader.
+
+  8/8 pt.4 (Jono's request — LEL_Emissions_Data farm_name fix, confirmed
+  live): Jono inspected LEL_Emissions_Data directly and found it DOES have
+  a farm_name field — investigation confirmed the SOURCE layer has carried
+  real, populated per-farm rows since 22/7 (03. Emissions_Live_Pipeline_v2.py
+  already writes one row per farm+treatment plus an AGGREGATE_LABEL row
+  every run), it was only ever missing from LEL_Emissions_Data_view's
+  exposed field list. Jono ran 01. Python Scripts/12.
+  Emissions_View_Add_Farm_Name_Field.py to add it to the view. With that
+  live, fetchEmissionsForFarm() now does a real farm_name='<FARM>' query
+  with a trial-wide fallback (same pattern as fetchEconForFarm()), instead
+  of always returning the trial aggregate. Also fixed fetchTrialWideEmissions()
+  to explicitly filter farm_name=AGGREGATE_LABEL — before farm_name existed,
+  an unfiltered "treatment='seafeed'" query only had trial-wide rows to
+  return, but now that per-farm rows exist too, an unfiltered "latest by
+  record_date" query could non-deterministically return either one on a
+  tie (confirmed live: current per-farm and aggregate rows share the exact
+  same record_date). Same class of bug fixed today across page-1-home.html,
+  page-2-farms.html and page-5-data.html's equivalent Emissions/Economics
+  queries. The "farm vs trial average" card's abatement row (previously a
+  static "not split by farm yet" note) is now live too, matching the ADG
+  row above it.
+
+  8/8 pt.5 (Jono's request — lick block chart was showing the wrong
+  metric): inspected LEL_Lick_Block_Data_view live and confirmed it has a
+  total_blocks_placed field (Integer) — an actual count of blocks used per
+  asset. The chart was plotting average_consumption_per_day (a kg/day
+  rate) instead, which never actually answered "how many blocks has the
+  farm used". Swapped to total_blocks_placed. (Superseded 8/10 — see below,
+  this whole chart was later rebuilt to read from a real history table.)
+
+  8/10 pass — lick block reorder decision-support tool (Jono's request):
+  LEL_Lick_Block_Data_view is fully purged and rebuilt every pipeline run,
+  so there was no history to build a "usage over time" chart or a run-out
+  projection from. Two new tables built (LEL_Lick_Block_Usage_History,
+  append-only, written by 02. LEL_Lick_Block_Tracker_v2.py every run;
+  LEL_Lick_Block_Orders, edited directly by Jono whenever an order is
+  placed) — the lick block chart now reads real cumulative history from
+  the first, and a new reorder forecast card (on-hand / days-to-empty /
+  reorder-by, 116 blocks per order = 2×58, SeaFeed and Control tracked as
+  separate countdowns since they're separate pallets) reads from both.
+  Both tables start empty from 10/8 and build up going forward.
+
+  8/10 pass — economic feasibility calculator, embedded (Jono's request):
+  was a link out to page-7-calculator.html, now built directly into the
+  portal so a producer can use it there and then, pre-filled with this
+  farm's own Control-group data as the "business as usual" baseline (see
+  initFeasibilityCalculator()'s own comment for why Control, not SeaFeed —
+  the calculator adds the trial's demonstrated SeaFeed uplift on top of
+  whatever's entered, so seeding it with SeaFeed's already-uplifted numbers
+  would double-count the benefit). Cost of production is deliberately NOT
+  pre-filled — LEL_Economics_Data's cost_per_kg_gain_aud is the lick
+  block's own supplement cost only, not the farm's total cost of
+  production, and using it as the calculator's whole-farm COP baseline
+  produced a bogus loss (found investigating "why does this show a loss
+  when the full calculator shows a profit" — head count, current weight
+  and growth rate are genuine trial measurements and stay farm-prefilled;
+  COP has no trial data source and stays a manually-entered assumption,
+  same as the full calculator, with the same MLA cost-of-production tool
+  link for anyone who doesn't know their own figure).
+
+  8/12 pass — sale-readiness projection + ADG early-warning alert (Jono's
+  request, following the "2-3 recommendations to aid farm decisions"
+  review): two new decision-support features, both reading data already
+  live on this page.
+
+  1. SALE READINESS (new card, between the KPI row and Lick block supply).
+     Answers "when will this mob hit sale weight" per treatment, using each
+     treatment's own live current weight (rolling_weight_14d) and own
+     trial-to-date growth rate (the same Economics-based ADG figure the KPI
+     card and calculator already use, kept consistent rather than
+     introducing a second ADG figure on the page). The number itself is
+     genuinely researched, not a guess dressed up as one: a straight-line
+     projection (days = gap / today's ADG) assumes growth stays constant
+     all the way to the target, but cattle liveweight is well established
+     in the animal-science literature to follow a Gompertz growth curve —
+     growth rate decelerates as an animal approaches its own mature
+     (asymptotic) weight, and Gompertz consistently out-fits the
+     alternatives (Brody, Logistic, von Bertalanffy) in published cattle
+     growth-curve studies. Implemented in daysToTargetGompertz() below:
+     dW/dt = k*W*ln(A/W), with k solved from the animal's OWN current
+     weight and ADG so the curve always passes through today's real,
+     measured point, integrated forward a day at a time. Validated
+     numerically before building this: a 410kg/0.9kg-day-ADG animal
+     targeting 480kg took 88 projected days under Gompertz vs 78 days
+     under straight-line division, with ADG smoothly declining from 0.90
+     to 0.69kg/day over that projection — a materially different, more
+     defensible answer, not a rounding difference.
+     Mature weight (A) is a genuine open assumption, not a trial
+     measurement — no confirmed steer-specific (as opposed to breeding-cow)
+     mature-weight figure was found. Angus Australia's own published
+     average mature COW weight is 572kg (sd 97kg); ASSUMED_MATURE_WEIGHT_KG
+     below uses 650kg as a mid-frame steer estimate above that cow figure.
+     Sensitivity-checked before committing to a default: across a
+     580-750kg range for A, the same test case above projected 84-96 days
+     — a real, meaningful lever, not noise — so this is surfaced in the
+     footnote as an assumption rather than hidden, and made an adjustable
+     input in the "Plan ahead" calculator below (calc-mature-weight) for
+     anyone who knows their herd's typical finished weight. The live KPI
+     card itself stays non-interactive (states the assumption, doesn't let
+     you tune it inline) to stay a glance-and-go figure like the rest of
+     the KPI row — the calculator is the place to explore "what if my herd
+     finishes heavier/lighter than 650kg".
+     The "Plan ahead" calculator's own day-count math (calcFeasibility())
+     is retrofitted to the same Gompertz model for consistency — was pure
+     linear division before this pass. Per-day cost rate is still treated
+     as constant over the projection (a simplification — feed efficiency
+     genuinely also changes as animals near finishing, but modelling that
+     on top of a growth-curve retrofit was judged over-engineering for
+     what's being asked here; flagged in code for anyone revisiting this).
+
+  2. ADG EARLY-WARNING ALERT (folded into the existing alert banner at the
+     top of the page, alongside the lick block reorder alert already
+     there). Answers "is something wrong with either mob right now" —
+     flags a treatment whose ADG has dropped meaningfully below its own
+     recent trend, or gone negative outright. Deliberately reads
+     OptiWeigh_Cattle_Weights/rolling_adg (a genuine trailing ~14-day
+     regression per animal, sensitive to a recent change) rather than the
+     Economics-based trial-to-date average used elsewhere on the page —
+     that figure answers "has SeaFeed worked overall" and is deliberately
+     smoothed for that purpose, which is exactly wrong for catching a
+     recent problem. Compares each treatment against its OWN recent
+     history (last ~3 readings vs the ~21-32 days before that), not
+     against the other treatment or a fixed number — a farm simply running
+     slower than the trial average isn't itself an alert, a sudden change
+     from a mob's own normal is. See detectAdgWarning()'s own comment for
+     the exact threshold and reasoning.
+
+  8/12 pass 2 — visual hierarchy polish (Jono's request: "distinguish the
+  data for the farmer at a glance, show me the figures I want to see as a
+  farmer first up in contrasting colours... visually pleasing, easy to
+  use"). No new data, no new sections — sharpening how the existing
+  numbers read, applying the dashboard-design skill's own principles more
+  strictly than before:
+  - Every .pp-kpi-label is now uppercase with letter-spacing (matching the
+    split/section labels elsewhere on the page) so labels recede further
+    and the big bold value is unambiguously the hero of each card.
+  - The hero ADG card (the single "is it working" figure) gets a dynamic
+    4px mint/red left border plus a small "Ahead of Control"/"Behind
+    Control" badge with a directional glyph — the same ahead/behind read
+    the value's own colour already gives, repeated in a second, shape-
+    based form so it's legible at a glance/thumbnail size and doesn't rely
+    on colour alone. Deliberately scoped to only this one card (dashboard-
+    design skill principle #2 — one accent, used consistently, not
+    scattered onto every card).
+  - Found and fixed a real inconsistency while doing this: the "farm vs
+    trial average" comparison bars were hardcoded mint regardless of
+    direction, so a farm actually BEHIND the trial average could still
+    show a green bar — directly contradicting the page's own mint=good/
+    red=bad rule. Both bars (ADG and abatement) now colour dynamically.
+  - Sale readiness's single most useful number ("SeaFeed sells X days
+    sooner than Control") was buried in a footnote sentence — promoted to
+    its own mint-tinted stat banner at the top of that card, matching the
+    visual weight the red alert banner already gets for a problem.
+  - Alert banner now breaks into one bullet per item once there's more
+    than one (reorder + ADG warnings can now co-occur) instead of one
+    run-on " · "-joined sentence — easier to triage at a glance.
+-->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+  :root{
+    --tf-navy-900:#041221;
+    --tf-navy-800:oklch(from var(--tf-navy-900) calc(l + 0.08) c h);
+    --tf-slate-400:#a9b8c4;
+    --tf-slate-300:oklch(from var(--tf-slate-400) calc(l + 0.08) c h);
+    --tf-slate-200:oklch(from var(--tf-slate-400) calc(l + 0.14) c h);
+    --tf-slate-100:oklch(from var(--tf-slate-400) calc(l + 0.19) c h);
+    --tf-slate-600:oklch(from var(--tf-slate-400) calc(l - 0.18) c h);
+    --tf-mint-500:#5ec9a8;
+    --tf-mint-600:oklch(from var(--tf-mint-500) calc(l - 0.1) c h);
+    --tf-mint-400:oklch(from var(--tf-mint-500) calc(l + 0.08) c h);
+    --tf-coral-500:#d85a30;
+    /* Jono's request, 8/8 pt.3: every KPI value that IS SeaFeed's own
+       reading (not a computed delta between treatments) uses this exact
+       hex — matches the chart JS's MINT constant so a SeaFeed number
+       reads the same whether it's in a chart or a KPI card. Control stays
+       on the default heading colour, unchanged. */
+    --tf-seafeed:#3aa989;
+    /* 8/10 addition — the page's one true "bad/behind" red, matching the
+       chart JS's RED constant exactly. Added so CSS-only rules (that
+       can't reach the JS colour constants) can match the same hex the
+       calculator and every chart already use, instead of the more
+       orange-leaning --tf-coral-500. */
+    --tf-red:#c0392b;
+    --tf-white:#ffffff;
+    --tf-warning:#c98a2e;
+    --surface-page:#faf9f6;
+    --surface-sunken:var(--tf-slate-100);
+    --surface-card:var(--tf-white);
+    --text-heading:var(--tf-navy-900);
+    --text-body:oklch(from var(--tf-navy-900) calc(l + 0.06) calc(c - 0.005) h);
+    --text-muted:var(--tf-slate-600);
+    --border-subtle:var(--tf-slate-200);
+    --border-default:var(--tf-slate-300);
+    --radius-lg:12px; --radius-md:10px; --radius-sm:6px;
+    --shadow-sm:0 1px 2px rgba(4,18,33,0.08);
+    --font-display:Tahoma,Verdana,sans-serif;
+    --font-body:Verdana,Tahoma,sans-serif;
+  }
+  html, body { margin: 0; background: var(--surface-page); }
+  body { font-family: var(--font-body); color: var(--text-body); -webkit-font-smoothing:antialiased; }
+  .pp-page { max-width: 1320px; margin: 0 auto; padding: 28px 32px 64px; box-sizing: border-box; }
+  @media (max-width: 720px) { .pp-page { padding: 20px 16px 48px; } }
+
+  /* ---- Shared card system: every card on the page shares radius, padding
+     and shadow. The ONE deliberate variation is background/border, which
+     splits cards into two structural groups: sunken (KPI + summary
+     figures) vs bordered-white (chart containers) — not decoration, a
+     way of telling "headline number" cards apart from "supporting chart"
+     cards at a glance. ---- */
+  .pp-kpi-card, .pp-card, .pp-cumulative-card {
+    border-radius: var(--radius-lg);
+    padding: 22px 24px;
+    box-shadow: var(--shadow-sm);
+    box-sizing: border-box;
+  }
+  .pp-kpi-card, .pp-cumulative-card { background: var(--surface-sunken); }
+  .pp-card { background: var(--surface-card); border: 1px solid var(--border-subtle); }
+
+  /* ---- Header: the page's one deliberate contrast zone (dark masthead
+     vs light body), tied to a real structural boundary rather than
+     scattered per-card. ---- */
+  .pp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 26px 28px; background: var(--tf-navy-900); border-radius: var(--radius-lg); margin-bottom: 20px; flex-wrap: wrap; }
+  .pp-farm-name { font-family: var(--font-display); font-weight: 700; font-size: 27px; color: var(--tf-white); margin: 0; }
+  .pp-subtitle { font-size: 14px; color: rgba(255,255,255,0.55); margin: 4px 0 0 0; }
+  .pp-meta { font-size: 11.5px; color: rgba(255,255,255,0.5); text-align: right; line-height: 1.6; }
+  .pp-meta .live { color: var(--tf-mint-400); font-weight: 700; }
+  .pp-meta .stale { color: var(--tf-warning); font-weight: 700; }
+  /* 8/12 polish — small pulsing dot ahead of "Live data" so the status
+     line reads as an active indicator, not just coloured text (matches
+     the same restrained, functional use of motion as .pp-skel below —
+     signals state, isn't decoration). Respects reduced-motion same as
+     the skeleton shimmer. */
+  .pp-meta .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--tf-mint-400); animation: pp-pulse 1.8s ease-in-out infinite; }
+  @keyframes pp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .pp-meta .live::before { animation: none; } }
+
+  /* 8/10 addition — conditional alert banner, above everything else
+     including the KPI row. Only shown when renderReorderStat() flags a
+     treatment as overdue or out of stock (see the JS at the bottom) — an
+     exception like that shouldn't be waiting below a scroll of otherwise-
+     fine numbers to be noticed. */
+  .pp-alert-banner { display: flex; align-items: flex-start; gap: 12px; background: rgba(192,57,43,0.08); border: 1px solid rgba(192,57,43,0.28); border-radius: var(--radius-lg); padding: 14px 20px; margin-bottom: 20px; }
+  .pp-alert-icon { flex-shrink: 0; width: 22px; height: 22px; color: var(--tf-red); margin-top: 1px; }
+  .pp-alert-text { font-size: 13.5px; color: var(--text-heading); line-height: 1.6; }
+  .pp-alert-text strong { color: var(--tf-red); }
+
+  /* 8/10 addition — small eyebrow labels grouping the page into the
+     sections a farmer actually thinks in (see the header comment above
+     for the full reasoning), not decoration. */
+  .pp-section-label { font-family: var(--font-display); font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.07em; margin: 0 0 10px 2px; }
+
+  .pp-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 20px; }
+  /* 8/12 polish (Jono's request — "distinguish the data... at a glance"):
+     uppercase + letter-spacing on every KPI label, matching the treatment
+     .pp-kpi-split-label and .pp-section-label already use elsewhere on
+     this page. Small labels reading as small-caps make the big bold value
+     below them recede further into "caption", sharpening the number-is-
+     the-hero contrast (dashboard-design skill principle #1) instead of a
+     label and value competing at similar visual weight. */
+  .pp-kpi-label { font-size: 11.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 8px 0; }
+  .pp-kpi-value { font-family: var(--font-display); font-size: 30px; font-weight: 700; color: var(--text-heading); margin: 0; }
+  .pp-kpi-value.accent { color: var(--tf-seafeed); }
+  .pp-kpi-note { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; }
+  .pp-kpi-note.stale { color: var(--tf-warning); font-weight: 700; }
+  .pp-kpi-split { display: flex; gap: 22px; }
+  .pp-kpi-split-label { font-size: 11px; color: var(--text-muted); margin: 0 0 2px 0; text-transform: uppercase; letter-spacing: 0.03em; }
+  .pp-kpi-split-value { font-family: var(--font-display); font-size: 23px; font-weight: 700; color: var(--text-heading); margin: 0; }
+  /* Jono's request, 8/8 pt.3: SeaFeed's own values coloured, Control left
+     on the default heading colour ("remain as is"). Applied to the value
+     only, not the small "SeaFeed" caption above it, so the caption stays
+     muted like every other card label on the page. */
+  .pp-seafeed-value { color: var(--tf-seafeed); }
+
+  /* 8/10 addition — ADG vs control is the single clearest "is it working"
+     signal, so it's now the widened, largest-type hero of the KPI row
+     (dashboard-design skill principle #1: the number is the hero) instead
+     of matching-size with the other three cards. Still the same card
+     system (radius/padding/shadow/background) as every other KPI card —
+     bigger through grid span + type size only, not a different style. */
+  .pp-kpi-hero { grid-column: span 2; }
+  @media (max-width: 720px) { .pp-kpi-hero { grid-column: span 1; } }
+  .pp-kpi-hero .pp-kpi-label { font-size: 12.5px; }
+  .pp-kpi-hero .pp-kpi-value { font-size: 48px; }
+
+  /* 8/12 polish (Jono's request — "figures I want to see as a farmer
+     first up in contrasting colours"): the hero ADG card gets a dynamic
+     4px accent border (mint when ahead of Control, red when behind — set
+     by JS alongside the existing value colour) plus a small text badge
+     repeating the same ahead/behind read with a directional glyph. Two
+     reasons for the redundancy: (1) a border strip reads as a status
+     signal from further away / smaller thumbnail than the number itself
+     has to be legible at, and (2) colour alone shouldn't be the only way
+     "good" vs "needs a look" is communicated (a shape/text cue helps
+     anyone glancing quickly or with colour-vision differences). Scoped to
+     ONLY the hero card, not every KPI — spreading this everywhere would
+     dilute it back into background noise instead of standing out
+     (dashboard-design skill principle #2: one accent, used consistently,
+     not scattered). */
+  .pp-kpi-hero { border-left: 4px solid transparent; }
+  .pp-kpi-badge { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-display); font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-top: 10px; }
+  .pp-kpi-badge.ahead { color: var(--tf-seafeed); background: rgba(58,169,137,0.12); }
+  .pp-kpi-badge.behind { color: var(--tf-red); background: rgba(192,57,43,0.12); }
+
+  .pp-chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 20px; }
+  @media (max-width: 720px) { .pp-chart-grid { grid-template-columns: 1fr; } }
+  .pp-card-title { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-heading); margin: 0 0 14px 0; }
+  .pp-chart-box { position: relative; height: 260px; }
+  .pp-chart-box canvas { width: 100% !important; height: 100% !important; }
+  .pp-chart-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 40px 0; }
+
+  .pp-compare-card { margin-bottom: 20px; }
+  .pp-compare-row { margin-bottom: 12px; }
+  .pp-compare-row:last-child { margin-bottom: 0; }
+  .pp-compare-labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+  .pp-compare-track { background: var(--surface-sunken); border-radius: 6px; height: 8px; overflow: hidden; }
+  /* 8/12 fix (Jono's request — "distinguish the data in contrasting
+     colours"): was a fixed mint fill regardless of direction, so a farm
+     sitting BELOW the trial average still showed as a "good" green bar —
+     directly contradicts the page's own mint=ahead/red=behind rule. Now
+     set dynamically by JS to MINT/RED per row, same as every other
+     ahead/behind indicator on the page. Mint kept here only as the
+     pre-data-load fallback (bars start at width:0% anyway, so this is
+     never actually visible before real data sets a real colour). */
+  .pp-compare-fill { background: var(--tf-mint-500); height: 8px; border-radius: 6px; transition: width 0.6s ease, background 0.3s ease; }
+
+  .pp-cumulative-title { font-size: 13px; color: var(--text-muted); margin: 0 0 12px 0; }
+  .pp-cumulative-row { display: flex; gap: 40px; flex-wrap: wrap; }
+  .pp-cumulative-value { font-family: var(--font-display); font-size: 28px; font-weight: 700; color: var(--text-heading); margin: 0; }
+  .pp-cumulative-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; max-width: 28ch; }
+
+  /* 8/10 addition — lick block reorder forecast card (Jono's request).
+     Two columns, one per treatment, since SeaFeed/Control are ordered as
+     separate pallets and each gets its own countdown. */
+  .pp-reorder-card { margin-bottom: 20px; }
+  .pp-reorder-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  @media (max-width: 560px) { .pp-reorder-grid { grid-template-columns: 1fr; } }
+  .pp-reorder-treatment { font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0 0 10px 0; }
+  .pp-reorder-stats { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+  .pp-reorder-stats > div { display: flex; justify-content: space-between; align-items: baseline; }
+  .pp-reorder-stat-label { font-size: 12px; color: var(--text-muted); }
+  .pp-reorder-stat-value { font-family: var(--font-display); font-size: 16px; font-weight: 700; color: var(--text-heading); }
+  .pp-reorder-stat-value.overdue { color: var(--tf-red); }
+
+  /* 8/12 polish (Jono's request — "figures I want to see as a farmer
+     first up"): the single most decision-relevant number in the Sale
+     readiness card — how much sooner SeaFeed reaches target than Control
+     — was previously buried in a footnote sentence at the bottom.
+     Promoted to its own banner-style stat, styled as a mint-tinted
+     positive-status strip (same visual language as the red alert banner
+     above, just the good-news equivalent) so it reads with the same
+     immediacy a problem would, not less. */
+  .pp-sale-advantage { display: flex; align-items: center; gap: 8px; background: rgba(58,169,137,0.08); border: 1px solid rgba(58,169,137,0.24); border-radius: var(--radius-md); padding: 10px 16px; margin: 0 0 16px 0; font-family: var(--font-display); font-size: 15px; font-weight: 700; color: var(--tf-seafeed); }
+
+  /* 8/10 rebuild — embedded economic feasibility calculator. */
+  .pp-calc-copy { font-size: 13px; color: var(--text-muted); margin: 0 0 18px 0; }
+  .pp-calc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 16px; align-items: start; }
+  .pp-calc-field label { display: block; font-size: 11.5px; color: var(--text-muted); margin-bottom: 5px; min-height: 28px; }
+  .pp-calc-field input { width: 100%; box-sizing: border-box; font-family: var(--font-display); font-size: 15px; font-weight: 700; color: var(--text-heading); background: var(--surface-sunken); border: 1px solid var(--tf-slate-200, #dfe6ea); border-radius: var(--radius-sm); padding: 8px 10px; }
+  .pp-calc-field input:focus { outline: 2px solid var(--tf-mint-400); outline-offset: 1px; }
+  .pp-calc-help-link { display: block; font-size: 10.5px; color: var(--tf-mint-600); text-decoration: none; margin-top: 4px; }
+  .pp-calc-help-link:hover { text-decoration: underline; }
+  .pp-calc-note { font-size: 12px; color: var(--tf-warning); margin: 0 0 10px 0; }
+  .pp-calc-results { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; background: var(--surface-sunken); border-radius: var(--radius-md); padding: 18px 20px; margin-bottom: 14px; }
+  @media (max-width: 480px) { .pp-calc-results { grid-template-columns: 1fr; } }
+  .pp-calc-result-value { font-family: var(--font-display); font-size: 26px; font-weight: 700; color: var(--tf-seafeed); margin: 0; }
+  .pp-calc-result-caption { font-size: 12px; color: var(--text-muted); margin: 4px 0 0 0; }
+  .pp-calc-footnote { font-size: 11px; color: var(--text-muted); margin: 0; }
+  .pp-calc-footnote a { color: var(--tf-mint-600); font-weight: 700; text-decoration: none; }
+  .pp-calc-footnote a:hover { text-decoration: underline; }
+
+  @keyframes pp-shimmer{ 0%{ background-position:150% 0; } 100%{ background-position:-50% 0; } }
+  /* 8/12 polish — was sized by nbsp count inside each span, which ties the
+     placeholder's width to font metrics rather than to a deliberate size,
+     and doesn't reliably match the width of the real value once it loads
+     (e.g. seven nbsp at 48px bold is nothing like "+23.4%"'s actual
+     width) — the mismatch reads as a small jump/flicker the instant data
+     arrives. height:0.8em scales automatically with whichever value's
+     font-size it sits inside (hero 48px vs regular 30px vs split 23px),
+     so only width needs a size class. */
+  .pp-skel { display: inline-block; height: 0.8em; vertical-align: middle; border-radius: 6px; background-size: 250% 100%; animation: pp-shimmer 1.4s ease-in-out infinite; background-image: linear-gradient(90deg, rgba(4,18,33,0.08) 25%, rgba(4,18,33,0.16) 37%, rgba(4,18,33,0.08) 63%); }
+  .pp-skel-lg { width: 128px; }
+  .pp-skel-md { width: 68px; }
+  @media (prefers-reduced-motion: reduce) { .pp-skel { animation: none !important; } }
+
+  /* 8/12 polish — print stylesheet. A farmer or their accountant/bank
+     manager may well print this page; without this it would print a
+     near-black masthead (wasting ink), card shadows that render as grey
+     smudges, and cards splitting awkwardly across a page break. */
+  @media print {
+    body { background: var(--tf-white); }
+    .pp-page { max-width: none; padding: 0; }
+    .pp-header { background: var(--tf-white); border: 1px solid var(--border-default); box-shadow: none; }
+    .pp-farm-name { color: var(--text-heading); }
+    .pp-subtitle, .pp-meta { color: var(--text-muted); }
+    .pp-meta .live::before { display: none; }
+    .pp-kpi-card, .pp-card, .pp-cumulative-card, .pp-alert-banner { box-shadow: none; break-inside: avoid; }
+    .pp-calc-help-link { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="pp-page">
+
+  <!-- ============ HEADER ============ -->
+  <div class="pp-header">
+    <div>
+      <p class="pp-farm-name" id="pp-farm-name">&nbsp;</p>
+      <p class="pp-subtitle">Low Emissions Livestock trial, producer view</p>
+    </div>
+    <div class="pp-meta">
+      <span id="pp-status">Loading live data&hellip;</span><br>
+      Private link: not for sharing
+    </div>
+  </div>
+
+  <!-- ============ ALERT BANNER (conditional) ============
+       8/10 addition: hidden by default, only shown by the JS below if a
+       treatment's lick block stock is overdue for reorder or already out.
+       Sits above the KPI row deliberately — an exception like this
+       shouldn't be waiting below otherwise-fine numbers to be seen. -->
+  <div class="pp-alert-banner" id="pp-alert-banner" style="display:none;" role="alert" aria-live="polite">
+    <svg class="pp-alert-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path>
+      <line x1="12" y1="9" x2="12" y2="13"></line>
+      <line x1="12" y1="17" x2="12.01" y2="17"></line>
+    </svg>
+    <p class="pp-alert-text" id="pp-alert-text"></p>
+  </div>
+
+  <!-- ============ YOUR RESULTS ============
+       8/10 reorder (Jono's request — farmer's-perspective redesign): "is
+       it working for my animals" is the first question a producer has, so
+       ADG leads this row as the widened hero KPI, current weight and cost
+       of production (the tangible, concrete evidence) follow, and methane
+       abatement — the trial's actual purpose, but the trial's story more
+       than the farmer's own day-to-day question — is last of the four. -->
+  <p class="pp-section-label">Your results, trial-to-date</p>
+  <div class="pp-kpi-grid">
+    <div class="pp-kpi-card pp-kpi-hero" id="kpi-adg-card">
+      <p class="pp-kpi-label">Treatment vs control</p>
+      <p class="pp-kpi-value accent" id="kpi-adg"><span class="pp-skel pp-skel-lg"></span></p>
+      <span class="pp-kpi-badge" id="kpi-adg-badge" style="display:none;"></span>
+    </div>
+    <div class="pp-kpi-card">
+      <p class="pp-kpi-label">Current weight</p>
+      <div class="pp-kpi-split">
+        <div>
+          <p class="pp-kpi-split-label">Treatment</p>
+          <p class="pp-kpi-split-value pp-seafeed-value" id="kpi-weight-seafeed"><span class="pp-skel pp-skel-md"></span></p>
+        </div>
+        <div>
+          <p class="pp-kpi-split-label">Control</p>
+          <p class="pp-kpi-split-value" id="kpi-weight-control"><span class="pp-skel pp-skel-md"></span></p>
+        </div>
+      </div>
+    </div>
+    <div class="pp-kpi-card">
+      <p class="pp-kpi-label">Cost of production</p>
+      <div class="pp-kpi-split">
+        <div>
+          <p class="pp-kpi-split-label">Treatment</p>
+          <p class="pp-kpi-split-value pp-seafeed-value" id="kpi-cop-seafeed"><span class="pp-skel pp-skel-md"></span></p>
+        </div>
+        <div>
+          <p class="pp-kpi-split-label">Control</p>
+          <p class="pp-kpi-split-value" id="kpi-cop-control"><span class="pp-skel pp-skel-md"></span></p>
+        </div>
+      </div>
+      <p class="pp-kpi-note" id="kpi-cop-note"></p>
+    </div>
+    <div class="pp-kpi-card">
+      <p class="pp-kpi-label">Methane abatement</p>
+      <p class="pp-kpi-value pp-seafeed-value" id="kpi-abatement"><span class="pp-skel pp-skel-md"></span></p>
+      <p class="pp-kpi-note" id="kpi-abatement-note"></p>
+    </div>
+  </div>
+
+  <!-- ============ SALE READINESS ============
+       8/12 addition (Jono's request — see header comment for the full
+       Gompertz growth-curve reasoning). Sits right after "your results" —
+       a direct extension of "is it working" into "what does that mean for
+       my sale date" — and ahead of Lick block supply, the page's other
+       actionable card. -->
+  <p class="pp-section-label">Sale readiness</p>
+  <div class="pp-card pp-reorder-card">
+    <p class="pp-card-title">Projected time to target weight</p>
+    <p class="pp-calc-copy" id="sale-intro">Projected from each treatment's own current weight and growth rate, using a growth-curve model that slows as animals near their mature size, not a straight-line guess.</p>
+    <p class="pp-sale-advantage" id="sale-advantage" style="display:none;"></p>
+    <div class="pp-reorder-grid">
+      <div>
+        <p class="pp-reorder-treatment pp-seafeed-value">Treatment</p>
+        <div class="pp-reorder-stats">
+          <div><span class="pp-reorder-stat-label">Projected date</span><span class="pp-reorder-stat-value pp-seafeed-value" id="sale-sf-date">&ndash;</span></div>
+          <div><span class="pp-reorder-stat-label">Days to go</span><span class="pp-reorder-stat-value pp-seafeed-value" id="sale-sf-days">&ndash;</span></div>
+        </div>
+        <p class="pp-kpi-note" id="sale-sf-note"></p>
+      </div>
+      <div>
+        <p class="pp-reorder-treatment">Control</p>
+        <div class="pp-reorder-stats">
+          <div><span class="pp-reorder-stat-label">Projected date</span><span class="pp-reorder-stat-value" id="sale-ct-date">&ndash;</span></div>
+          <div><span class="pp-reorder-stat-label">Days to go</span><span class="pp-reorder-stat-value" id="sale-ct-days">&ndash;</span></div>
+        </div>
+        <p class="pp-kpi-note" id="sale-ct-note"></p>
+      </div>
+    </div>
+    <p class="pp-calc-footnote" id="sale-footnote"></p>
+  </div>
+
+  <!-- ============ LICK BLOCK SUPPLY ============
+       8/10 reorder (Jono's request): moved from near the bottom of the
+       page to right after the farmer's own results — this is the only
+       genuinely actionable, time-sensitive card on the page (58 blocks/
+       pallet, 2 pallets/order). SeaFeed and Control tracked as separate
+       countdowns since they're ordered as separate pallets, not a shared
+       stock pool. Starts empty until at least one order is logged in
+       LEL_Lick_Block_Orders — see that table's own note in reorder-hint. -->
+  <p class="pp-section-label">Lick block supply</p>
+  <div class="pp-card pp-reorder-card">
+    <p class="pp-card-title">Reorder forecast</p>
+    <div class="pp-reorder-grid">
+      <div>
+        <p class="pp-reorder-treatment pp-seafeed-value">Treatment</p>
+        <div class="pp-reorder-stats">
+          <div><span class="pp-reorder-stat-label">On hand</span><span class="pp-reorder-stat-value pp-seafeed-value" id="reorder-sf-onhand">&ndash;</span></div>
+          <div><span class="pp-reorder-stat-label">Days to empty</span><span class="pp-reorder-stat-value pp-seafeed-value" id="reorder-sf-days">&ndash;</span></div>
+          <div><span class="pp-reorder-stat-label">Reorder by</span><span class="pp-reorder-stat-value pp-seafeed-value" id="reorder-sf-date">&ndash;</span></div>
+        </div>
+        <p class="pp-kpi-note" id="reorder-sf-note"></p>
+      </div>
+      <div>
+        <p class="pp-reorder-treatment">Control</p>
+        <div class="pp-reorder-stats">
+          <div><span class="pp-reorder-stat-label">On hand</span><span class="pp-reorder-stat-value" id="reorder-ct-onhand">&ndash;</span></div>
+          <div><span class="pp-reorder-stat-label">Days to empty</span><span class="pp-reorder-stat-value" id="reorder-ct-days">&ndash;</span></div>
+          <div><span class="pp-reorder-stat-label">Reorder by</span><span class="pp-reorder-stat-value" id="reorder-ct-date">&ndash;</span></div>
+        </div>
+        <p class="pp-kpi-note" id="reorder-ct-note"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ HOW YOU COMPARE ============ -->
+  <p class="pp-section-label">How you compare</p>
+  <div class="pp-card pp-compare-card">
+    <p class="pp-card-title">Your farm vs trial average</p>
+    <div class="pp-compare-row">
+      <div class="pp-compare-labels">
+        <span>ADG uplift</span>
+        <span id="compare-adg-label">&ndash;</span>
+      </div>
+      <div class="pp-compare-track"><div class="pp-compare-fill" id="compare-adg-fill" style="width:0%;" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="ADG uplift, this farm vs trial average"></div></div>
+    </div>
+    <div class="pp-compare-row">
+      <div class="pp-compare-labels">
+        <span>Methane abatement</span>
+        <span id="compare-abatement-label">&ndash;</span>
+      </div>
+      <div class="pp-compare-track"><div class="pp-compare-fill" id="compare-abatement-fill" style="width:0%;" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Methane abatement, this farm vs trial average"></div></div>
+    </div>
+  </div>
+
+  <!-- ============ TRENDS OVER TIME ============ -->
+  <p class="pp-section-label">Trends over time</p>
+  <div class="pp-chart-grid">
+    <div class="pp-card">
+      <p class="pp-card-title">Weight trend: Treatment vs Control</p>
+      <div class="pp-chart-box"><canvas id="chart-weight" role="img" aria-label="Weight trend, Treatment vs Control"></canvas></div>
+      <p class="pp-chart-empty" id="chart-weight-empty" style="display:none;">No weight readings recorded yet.</p>
+    </div>
+    <div class="pp-card">
+      <p class="pp-card-title">ADG trend: advantage over Control (g/day)</p>
+      <div class="pp-chart-box"><canvas id="chart-adg" role="img" aria-label="ADG trend, Treatment advantage over Control in grams per day"></canvas></div>
+      <p class="pp-chart-empty" id="chart-adg-empty" style="display:none;">No ADG readings recorded yet.</p>
+    </div>
+  </div>
+  <div class="pp-chart-grid">
+    <div class="pp-card">
+      <p class="pp-card-title">Cost of production trend</p>
+      <div class="pp-chart-box"><canvas id="chart-cop" role="img" aria-label="Cost of production trend, Treatment vs Control"></canvas></div>
+      <p class="pp-chart-empty" id="chart-cop-empty" style="display:none;">No cost-of-production readings recorded yet.</p>
+    </div>
+    <div class="pp-card">
+      <p class="pp-card-title">Lick block usage over time</p>
+      <div class="pp-chart-box"><canvas id="chart-lick" role="img" aria-label="Lick block usage over time, Treatment vs Control"></canvas></div>
+      <p class="pp-chart-empty" id="chart-lick-empty" style="display:none;">No usage history yet. This builds up from 10/8 onward.</p>
+    </div>
+  </div>
+
+  <!-- ============ YOUR CONTRIBUTION ============ -->
+  <p class="pp-section-label">Your contribution</p>
+  <div class="pp-cumulative-card">
+    <p class="pp-cumulative-title">Cumulative abatement to date</p>
+    <div class="pp-cumulative-row">
+      <div>
+        <p class="pp-cumulative-value" id="cum-ch4">&ndash;</p>
+        <p class="pp-cumulative-sub">methane (CH4) abated since trial start</p>
+      </div>
+      <div>
+        <p class="pp-cumulative-value" id="cum-co2e">&ndash;</p>
+        <p class="pp-cumulative-sub">CO2-equivalent, GWP100 basis</p>
+      </div>
+      <div>
+        <p class="pp-cumulative-value" id="cum-value">&ndash;</p>
+        <p class="pp-cumulative-sub">illustrative value at $32.50/t midpoint (not an ACCU credit)</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PLAN AHEAD ============
+       8/10 rebuild (Jono's request): was a CTA linking out to
+       page-7-calculator.html — now a streamlined version built directly
+       into the portal so a producer can use it there and then. Pre-filled
+       with this farm's own Control-group data as the baseline ("business
+       as usual") inputs, and its own SeaFeed uplift (falls back to the
+       trial-wide aggregate if this farm doesn't have enough data yet —
+       same fallback econ/econ.usedFallback already fetched for the KPI
+       cards above, no extra query needed). Deliberately simplified vs the
+       full page: one "reach a target weight" mode only, no direct/derived
+       ADG toggle, no $/day vs $/kg toggle — a full link-out is offered at
+       the bottom for anyone who wants those extra options. Positioned last
+       on the page deliberately — this is an occasional, forward-looking
+       planning tool a producer reaches for when they want it, not a
+       daily-glance figure like everything above it. -->
+  <p class="pp-section-label">Plan ahead</p>
+  <div class="pp-card pp-calc-card">
+    <p class="pp-card-title">Work out your own numbers</p>
+    <p class="pp-calc-copy" id="calc-intro">Herd size, current weight and growth rate are pre-filled with your farm's own trial data. Days-to-target now accounts for growth slowing as animals near their mature weight; adjust that assumption below if you know your herd's typical finished weight. Cost of production and sale price are your own figures to enter; change any of them to explore other scenarios.</p>
+    <div class="pp-calc-grid">
+      <div class="pp-calc-field">
+        <label for="calc-herd">Herd size (head)</label>
+        <input type="number" id="calc-herd" min="1" value="100">
+      </div>
+      <div class="pp-calc-field">
+        <label for="calc-current-weight">Current weight (kg)</label>
+        <input type="number" id="calc-current-weight" min="1" value="380">
+      </div>
+      <div class="pp-calc-field">
+        <label for="calc-target-weight">Target sale weight (kg)</label>
+        <input type="number" id="calc-target-weight" min="1" value="480">
+      </div>
+      <div class="pp-calc-field">
+        <label for="calc-adg">Current growth rate (kg/day)</label>
+        <input type="number" id="calc-adg" min="0.01" step="0.01" value="0.90">
+      </div>
+      <div class="pp-calc-field">
+        <label for="calc-mature-weight" title="An estimate of this herd's average mature (fully-grown) liveweight. Growth slows as animals approach it. Not a trial measurement; adjust if you know your herd's typical finished weight.">Assumed mature weight (kg)</label>
+        <input type="number" id="calc-mature-weight" min="1" step="1" value="650">
+      </div>
+      <div class="pp-calc-field">
+        <label for="calc-cop">Cost of production ($/kg liveweight)</label>
+        <input type="number" id="calc-cop" min="0" step="0.01" value="3.50">
+        <a class="pp-calc-help-link" href="https://tools.mla.com.au/cop/" target="_blank" rel="noopener">Don't know this figure? Work it out with MLA's free tool &#8599;</a>
+      </div>
+      <div class="pp-calc-field">
+        <label for="calc-price">Expected sale price ($/kg liveweight)</label>
+        <input type="number" id="calc-price" min="0" step="0.01" value="3.00">
+      </div>
+    </div>
+    <p class="pp-calc-note" id="calc-note"></p>
+    <div class="pp-calc-results" id="calc-results" style="display:none;">
+      <div class="pp-calc-result">
+        <p class="pp-calc-result-value" id="calc-days-value">&ndash;</p>
+        <p class="pp-calc-result-caption" id="calc-days-caption"></p>
+      </div>
+      <div class="pp-calc-result">
+        <p class="pp-calc-result-value" id="calc-saving-value">&ndash;</p>
+        <p class="pp-calc-result-caption" id="calc-saving-caption"></p>
+      </div>
+    </div>
+    <p class="pp-calc-footnote">Uses this farm's own trial-to-date Treatment uplift (falls back to the trial-wide average if this farm doesn't have enough data yet). Want more options, like feeding-period mode or a full cost breakdown? <a href="page-7-calculator.html" id="calc-full-link" target="_blank" rel="noopener">Open the full calculator</a>.</p>
+  </div>
+
+</div>
+
+<script>
+(function(){
+
+  // ============================================================
+  // CONFIG — endpoints and constants copied verbatim from the live
+  // public site (page-2-farms.html, page-5-data.html, farms-
+  // illustrative-carbon-value.html, page-7-calculator.html), so this
+  // portal can't disagree with the numbers already shown there.
+  // ============================================================
+  var EMISSIONS_URL     = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Emissions_Data_view/FeatureServer/0/query";
+  var ECON_URL           = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Economics_Data/FeatureServer/0/query";
+  var BENCHMARKS_URL     = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Industry_Benchmarks/FeatureServer/0/query";
+  var PRODUCTIVITY_URL   = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/OptiWeigh_Cattle_Weights/FeatureServer/0/query";
+  // 8/10 addition (Jono's request — reorder decision-support tool). Both
+  // created via ArcGIS Online's "Create new layer" UI after
+  // gis.content.create_service() proved unreliable for defining table
+  // schema directly. LEL_Lick_Block_Usage_History is appended to (never
+  // purged) by 02. LEL_Lick_Block_Tracker_v2.py every run, so it builds a
+  // real cumulative-usage trend going forward. LEL_Lick_Block_Orders is
+  // edited directly by Jono in ArcGIS Online whenever an order is placed —
+  // there's no historical stock baseline, so both tables start empty and
+  // build up from 10/8 onward (see fetchLickBlockOrders()'s own note).
+  var LICK_HISTORY_URL   = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Lick_Block_Usage_History/FeatureServer/0/query";
+  var LICK_ORDERS_URL    = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Lick_Block_Orders/FeatureServer/0/query";
+  var REORDER_LEAD_DAYS  = 40; // order this many days before projected run-out
+
+  var AGGREGATE_LABEL = "All Farms (Trial Aggregate)";
+  var REFERENCE_PRICE_AUD_PER_TONNE = 32.5; // matches farms-illustrative-carbon-value.html
+  var STALE_AFTER_DAYS = 14;
+  var GWP = 28; // AR5 100-yr default, overwritten by fetchGwp() below
+
+  // 8/12 addition — sale-readiness projection constants. See the header
+  // comment's "8/12 pass" section for the full research/validation trail.
+  var SALE_TARGET_WEIGHT_KG = 480; // matches the calculator's own default target
+  var ASSUMED_MATURE_WEIGHT_KG = 650; // genuine assumption, not a trial measurement — see header comment
+  var ADG_TREND_LOOKBACK_DAYS = 35; // for the early-warning alert, see fetchAdgTrendHistory()
+
+  // 8/8 pt.2 (dashboard-design skill): the page's whole chart/KPI colour
+  // vocabulary, in one place. MINT/SLATE/RED match page-5-data.html's own
+  // chart constants exactly so this portal's charts read as the same
+  // product as the public site's. MINT = SeaFeed identity + "good/ahead",
+  // SLATE = Control identity + anything neutral, RED = "behind/bad" only.
+  // Nothing else should introduce a new chart colour — see the skill for
+  // the reasoning. 8/10: also now used for kpi-adg's ahead/behind colour
+  // (was the softer CSS-derived --tf-mint-600/--tf-coral-500) so "ahead"
+  // and "behind" read as the exact same two colours everywhere on the
+  // page, not a slightly different shade per card.
+  var MINT = '#3aa989';
+  var SLATE = '#a9b8c4';
+  var RED = '#c0392b';
+
+  var FARM = new URLSearchParams(window.location.search).get('farm') || 'Bowood Farm';
+
+  function q(url, params){
+    return fetch(url + "?" + new URLSearchParams(params)).then(function(res){ return res.json(); }).then(function(data){
+      if (data.error) throw new Error(data.error.message || "Query failed");
+      return data;
+    });
+  }
+  function daysSinceEpochMs(ms){ return (Date.now() - ms) / 86400000; }
+  function fmtDate(ms){ return new Date(ms).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }); }
+
+  // ============================================================
+  // FETCHERS
+  // ============================================================
+  function fetchGwp(){
+    return q(BENCHMARKS_URL, { where: "metric_name='METHANE_GWP100_AR5'", outFields: "metric_value", f: "json" }).then(function(data){
+      if (data.features && data.features.length > 0) GWP = data.features[0].attributes.metric_value;
+    }).catch(function(err){ console.error('GWP lookup failed, using default 28:', err); });
+  }
+
+  // 7/8 fix (Jono's request): was SeaFeed-only. Now pulls the latest
+  // rolling_weight_14d for BOTH treatment groups so the "Current weight"
+  // card can show them side by side — same "keep the first (most recent)
+  // row per treatment" pattern as fetchEconForFarm/fetchTrialWideAdg below.
+  function fetchCurrentWeight(){
+    return q(PRODUCTIVITY_URL, {
+      where: "farm_name='" + FARM + "' AND treatment_group IN ('seafeed','control') AND rolling_weight_14d IS NOT NULL",
+      outFields: "rolling_weight_14d,snapshot_date,treatment_group",
+      orderByFields: "snapshot_date DESC", resultRecordCount: "20", f: "json"
+    }).then(function(data){
+      var latest = {};
+      data.features.forEach(function(f){ var t = f.attributes.treatment_group; if (!latest[t]) latest[t] = f.attributes; });
+      return latest;
+    });
+  }
+
+  // 8/12 addition (Jono's request, recommendation #2 — ADG early-warning
+  // alert). rolling_adg is OptiWeigh's own trailing ~14-day per-animal
+  // regression (see the tasfarmers-optiweigh-api skill) — much more
+  // sensitive to a RECENT change than the Economics-based trial-to-date
+  // average used everywhere else on this page (that figure answers "has
+  // SeaFeed worked overall", this one answers "is something wrong right
+  // now" — deliberately a second, differently-purposed figure, not an
+  // inconsistency with the KPI/calculator's own ADG). Pulled as its own
+  // history (last ADG_TREND_LOOKBACK_DAYS days) rather than folded into
+  // fetchCurrentWeight() above, since that fetcher only keeps the latest
+  // row per treatment and this needs a trend. See detectAdgWarning() for
+  // how this gets turned into an alert.
+  function fetchAdgTrendHistory(){
+    var sinceMs = Date.now() - ADG_TREND_LOOKBACK_DAYS * 86400000;
+    return q(PRODUCTIVITY_URL, {
+      where: "farm_name='" + FARM + "' AND treatment_group IN ('seafeed','control') AND rolling_adg IS NOT NULL AND snapshot_date >= TIMESTAMP '" + sqlTimestamp(sinceMs) + "'",
+      outFields: "snapshot_date,treatment_group,rolling_adg",
+      orderByFields: "snapshot_date ASC", resultRecordCount: "500", f: "json"
+    }).then(function(data){ return data.features.map(function(f){ return f.attributes; }); }).catch(function(err){
+      console.error('ADG trend history fetch failed:', err);
+      return [];
+    });
+  }
+
+  // Economics: farm-filtered first, falls back to the trial aggregate row
+  // if the farm has no farm_name-tagged Economics history yet (see header
+  // note #2). latest.usedFallback tells the caller which happened.
+  function fetchEconForFarm(){
+    return q(ECON_URL, {
+      where: "farm_name='" + FARM + "' AND treatment IN ('seafeed','control')",
+      outFields: "treatment,cumulative_ch4_abated_kg_per_head,representative_head_count,cost_per_kg_ch4_abated_aud,cost_per_head_aud,weight_gain_kg_per_head,days_of_data,cost_per_kg_gain_aud,calculation_date",
+      orderByFields: "calculation_date DESC", resultRecordCount: "10", f: "json"
+    }).then(function(data){
+      var latest = {};
+      data.features.forEach(function(f){ var t = f.attributes.treatment; if (!latest[t]) latest[t] = f.attributes; });
+      if (latest.seafeed && latest.control) { latest.usedFallback = false; return latest; }
+      // fall back to trial-wide aggregate
+      return q(ECON_URL, {
+        where: "farm_name='" + AGGREGATE_LABEL + "' AND treatment IN ('seafeed','control')",
+        outFields: "treatment,cumulative_ch4_abated_kg_per_head,representative_head_count,cost_per_kg_ch4_abated_aud,cost_per_head_aud,weight_gain_kg_per_head,days_of_data,cost_per_kg_gain_aud,calculation_date",
+        orderByFields: "calculation_date DESC", resultRecordCount: "10", f: "json"
+      }).then(function(fallbackData){
+        var fbLatest = {};
+        fallbackData.features.forEach(function(f){ var t = f.attributes.treatment; if (!fbLatest[t]) fbLatest[t] = f.attributes; });
+        fbLatest.usedFallback = true;
+        return fbLatest;
+      });
+    });
+  }
+
+  // 8/8 fix (Jono's request): LEL_Emissions_Data_view now has a real,
+  // populated farm_name field (source layer has had it since 22/7 — it
+  // was only ever missing from this view's exposed field list, now added,
+  // see 01. Python Scripts/12. Emissions_View_Add_Farm_Name_Field.py).
+  // fetchEmissionsForFarm() now genuinely filters by FARM, falling back to
+  // the trial aggregate the same way fetchEconForFarm() already does —
+  // this KPI card is no longer permanently trial-wide.
+  function fetchEmissionsQuery(farmName){
+    return q(EMISSIONS_URL, {
+      where: "treatment='seafeed' AND farm_name='" + farmName + "'",
+      outFields: "abatement_rate,record_date", orderByFields: "record_date DESC", resultRecordCount: "1", f: "json"
+    }).then(function(data){ return data.features.length ? data.features[0].attributes : null; });
+  }
+  function fetchEmissionsForFarm(){
+    return fetchEmissionsQuery(FARM).then(function(result){
+      if (result) return { data: result, usedFallback: false };
+      return fetchEmissionsQuery(AGGREGATE_LABEL).then(function(fbResult){ return { data: fbResult, usedFallback: true }; });
+    });
+  }
+  function fetchTrialWideEmissions(){ return fetchEmissionsQuery(AGGREGATE_LABEL); }
+
+  // Trial-wide ADG advantage (same formula as fetchEconForFarm), used only
+  // for the "your farm vs trial average" comparison bar.
+  function fetchTrialWideAdg(){
+    return q(ECON_URL, {
+      where: "farm_name='" + AGGREGATE_LABEL + "' AND treatment IN ('seafeed','control')",
+      outFields: "treatment,weight_gain_kg_per_head,days_of_data,calculation_date",
+      orderByFields: "calculation_date DESC", resultRecordCount: "10", f: "json"
+    }).then(function(data){
+      var latest = {};
+      data.features.forEach(function(f){ var t = f.attributes.treatment; if (!latest[t]) latest[t] = f.attributes; });
+      if (!latest.seafeed || !latest.control || !latest.seafeed.days_of_data || !latest.control.days_of_data) return null;
+      var days = Math.min(latest.seafeed.days_of_data, latest.control.days_of_data);
+      return ((latest.seafeed.weight_gain_kg_per_head - latest.control.weight_gain_kg_per_head) / days) * 1000;
+    });
+  }
+
+  // 8/8 pt.2 (dashboard-design skill redesign): now fetches BOTH treatments
+  // — was SeaFeed-only, which meant the Weight Trend chart told a different
+  // story to the Current Weight KPI card above it (that's split by
+  // treatment since the 7/8 pass). Same date-keyed join pattern as
+  // fetchCostHistory/the cost trend chart below, for the same reason: two
+  // filtered series plotted against a shared label list can silently
+  // misalign, so the render step below joins on the raw date instead.
+  function fetchWeightHistory(){
+    return q(PRODUCTIVITY_URL, {
+      where: "farm_name='" + FARM + "' AND treatment_group IN ('seafeed','control')",
+      outFields: "snapshot_date,rolling_weight_14d,treatment_group", orderByFields: "snapshot_date ASC", resultRecordCount: "2000", f: "json"
+    }).then(function(data){ return data.features.map(function(f){ return f.attributes; }); });
+  }
+
+  // ADG history — 8/8 fix: was reading OptiWeigh_Cattle_Weights/rolling_adg
+  // as two raw per-treatment lines, a noisier, unrelated methodology to the
+  // ADG vs control KPI above (which already used the Economics-based
+  // formula) and to page-5-data.html's own chart — that mismatch is why the
+  // trend looked "behind"/wrong. Rewritten to match page-5-data.html's 4/8
+  // methodology exactly: LEL_Economics_Data, SeaFeed vs Control paired by
+  // exact calculation_date match, single "ADG advantage" line = (seafeed.
+  // weight_gain_kg_per_head - control.weight_gain_kg_per_head) /
+  // min(days_of_data) * 1000 — identical formula to the KPI card and the
+  // Farm page badge, so this chart can no longer disagree with them.
+  // Farm-filtered first, falls back to the trial aggregate (same pattern as
+  // fetchEconForFarm/fetchCostHistory). The inner join (only dates present
+  // in BOTH treatments) means there's nothing to leave a gap — no nulls are
+  // ever pushed into the plotted series.
+  var ADG_CHART_START_MS = Date.UTC(2026, 5, 25); // matches page-5-data.html's trim — earliest weeks are thin, single-mob Control data
+  function sqlTimestamp(ms){ return new Date(ms).toISOString().slice(0, 19).replace('T', ' '); }
+  function fetchAdgPairedHistory(farmName){
+    return Promise.all([
+      q(ECON_URL, { where: "treatment='seafeed' AND farm_name='" + farmName + "' AND weight_gain_kg_per_head IS NOT NULL AND days_of_data IS NOT NULL AND calculation_date >= TIMESTAMP '" + sqlTimestamp(ADG_CHART_START_MS) + "'", outFields: "calculation_date,weight_gain_kg_per_head,days_of_data", orderByFields: "calculation_date ASC", resultRecordCount: "2000", f: "json" }),
+      q(ECON_URL, { where: "treatment='control' AND farm_name='" + farmName + "' AND weight_gain_kg_per_head IS NOT NULL AND days_of_data IS NOT NULL AND calculation_date >= TIMESTAMP '" + sqlTimestamp(ADG_CHART_START_MS) + "'", outFields: "calculation_date,weight_gain_kg_per_head,days_of_data", orderByFields: "calculation_date ASC", resultRecordCount: "2000", f: "json" })
+    ]).then(function(results){
+      var sfByDate = {}, ctByDate = {};
+      results[0].features.forEach(function(f){ sfByDate[f.attributes.calculation_date] = f.attributes; });
+      results[1].features.forEach(function(f){ ctByDate[f.attributes.calculation_date] = f.attributes; });
+      var dates = Object.keys(sfByDate).filter(function(d){ return ctByDate.hasOwnProperty(d); }).map(Number).sort(function(a, b){ return a - b; });
+      return dates.map(function(d){
+        var sf = sfByDate[d], ct = ctByDate[d];
+        var days = Math.min(sf.days_of_data, ct.days_of_data);
+        return { date: d, diff: ((sf.weight_gain_kg_per_head - ct.weight_gain_kg_per_head) / days) * 1000 };
+      });
+    });
+  }
+  function fetchAdgHistory(){
+    return fetchAdgPairedHistory(FARM).then(function(rows){
+      if (rows.length) return { rows: rows, usedFallback: false };
+      return fetchAdgPairedHistory(AGGREGATE_LABEL).then(function(fbRows){ return { rows: fbRows, usedFallback: true }; });
+    });
+  }
+
+  // 8/10 fix: was missing "cost_per_kg_gain_aud IS NOT NULL" — harmless
+  // while Bowood Farm rows only existed from 15 July onward (script 10/11's
+  // farm-name history was thin), but after 11. Economics_Backfill_Farm_Rows
+  // correctly extended Bowood Farm rows back to 11/5 (mirroring the
+  // AGGREGATE_LABEL rows, matching the ADG chart's own fix), most of those
+  // early rows have a null cost_per_kg_gain_aud — cost tracking itself
+  // didn't start until ~15 July, confirmed live (no cost data exists for
+  // ANY farm_name before then). Without this filter the query pulled those
+  // null rows in too, stretching the chart's x-axis back to 13 May with
+  // nothing to plot until mid-July. Matches fetchAdgPairedHistory()'s
+  // pattern above and page-5-data.html's own CoP query, both of which
+  // already filter on the field they actually plot.
+  function fetchCostHistory(){
+    return q(ECON_URL, {
+      where: "farm_name='" + FARM + "' AND treatment IN ('seafeed','control') AND cost_per_kg_gain_aud IS NOT NULL",
+      outFields: "calculation_date,cost_per_kg_gain_aud,treatment", orderByFields: "calculation_date ASC", resultRecordCount: "500", f: "json"
+    }).then(function(data){
+      if (data.features.length) return data.features.map(function(f){ return f.attributes; });
+      // fall back to trial-wide history if this farm has no cost history yet
+      return q(ECON_URL, {
+        where: "farm_name='" + AGGREGATE_LABEL + "' AND treatment IN ('seafeed','control') AND cost_per_kg_gain_aud IS NOT NULL",
+        outFields: "calculation_date,cost_per_kg_gain_aud,treatment", orderByFields: "calculation_date ASC", resultRecordCount: "500", f: "json"
+      }).then(function(fb){ return fb.features.map(function(f){ return f.attributes; }); });
+    });
+  }
+
+  // 8/10 rebuild (Jono's request — turn the old per-asset snapshot bar
+  // chart into a real "usage over time" line chart + reorder forecast).
+  // LEL_Lick_Block_Data_view (the old source, see fetchLickBlock() this
+  // replaced) is fully purged and rebuilt every pipeline run — there was
+  // no history to read. LEL_Lick_Block_Usage_History is append-only
+  // instead, so this genuinely accumulates a trend from 10/8 onward.
+  function fetchLickBlockHistory(){
+    return q(LICK_HISTORY_URL, {
+      where: "trial_site='" + FARM + "' AND treatment IN ('seafeed','control')",
+      outFields: "snapshot_date,treatment,cumulative_blocks_used,blocks_per_day_current",
+      orderByFields: "snapshot_date ASC", resultRecordCount: "2000", f: "json"
+    }).then(function(data){ return data.features.map(function(f){ return f.attributes; }); }).catch(function(err){
+      console.error('Lick block history fetch failed (check LICK_HISTORY_URL is correct):', err);
+      return [];
+    });
+  }
+
+  // Orders are logged manually by Jono in ArcGIS Online — no historical
+  // stock baseline exists, so this starts at zero and only reflects orders
+  // placed from 10/8 onward. Summed per treatment (SeaFeed/Control are
+  // separate pallets with their own countdown, per Jono's call on 8/10).
+  function fetchLickBlockOrders(){
+    return q(LICK_ORDERS_URL, {
+      where: "trial_site='" + FARM + "' AND treatment IN ('seafeed','control')",
+      outFields: "treatment,blocks_ordered,order_date",
+      orderByFields: "order_date ASC", resultRecordCount: "500", f: "json"
+    }).then(function(data){ return data.features.map(function(f){ return f.attributes; }); }).catch(function(err){
+      console.error('Lick block orders fetch failed (check LICK_ORDERS_URL is correct):', err);
+      return [];
+    });
+  }
+
+  // ============================================================
+  // GROWTH CURVE (Gompertz model) — 8/12 addition. See the header
+  // comment's "8/12 pass" section for the full research/validation trail
+  // (why Gompertz, the numerical validation run before this was built, and
+  // the mature-weight sensitivity check). dW/dt = k*W*ln(A/W): growth rate
+  // is proportional to how far the animal's current weight (W) is from its
+  // assumed mature weight (A), on a log scale — decelerating smoothly to
+  // zero as W approaches A. k is solved from the animal's OWN current
+  // weight and OWN current ADG, so the curve always starts from today's
+  // real, measured point; nothing about "today" is assumed, only the
+  // shape of the deceleration ahead. Integrated forward one day at a time
+  // (Euler method) rather than using a closed-form solution — daily step
+  // size is small relative to the growth timescale involved here, so this
+  // is a good approximation without the added complexity of solving the
+  // ODE analytically.
+  // Returns null (rather than a misleading number) if: the inputs aren't
+  // sane (non-positive weight/ADG), the assumed mature weight isn't above
+  // both the current and target weight, or the projected curve would
+  // plateau before reaching the target under these assumptions.
+  function daysToTargetGompertz(w0, adg0, matureWeight, targetWeight){
+    if (!(w0 > 0) || !(adg0 > 0) || !(matureWeight > w0) || !(matureWeight > targetWeight) || !(targetWeight > w0)) return null;
+    var k = adg0 / (w0 * Math.log(matureWeight / w0));
+    if (!(k > 0)) return null;
+    var w = w0, days = 0;
+    var MAX_DAYS = 2000; // safety cutoff — no sane projection should ever hit this
+    while (w < targetWeight && days < MAX_DAYS) {
+      var rate = k * w * Math.log(matureWeight / w);
+      if (!(rate > 0)) return null; // plateaued before reaching target under these assumptions
+      w += rate;
+      days++;
+    }
+    return days < MAX_DAYS ? days : null;
+  }
+
+  // 8/12 addition (Jono's request, recommendation #2 — ADG early-warning
+  // alert). Flags a treatment whose most recent rolling_adg readings have
+  // dropped meaningfully below its OWN recent trend, or gone negative
+  // outright (an absolute red flag regardless of trend — a negative ADG
+  // means the mob lost weight). Deliberately compares each treatment
+  // against its own history, not against the other treatment or a fixed
+  // benchmark — a farm simply running slower than the trial average isn't
+  // itself an alert, a sudden change from a mob's own normal is. Needs at
+  // least 6 readings to judge a trend at all; splits the most recent third
+  // (minimum 3 readings) off as "recent" and averages the rest as
+  // "baseline". ADG_DROP_ALERT_THRESHOLD of 0.7 means "recent average has
+  // fallen below 70% of its own baseline" — a deliberately blunt,
+  // explainable threshold rather than a formal statistical test (rolling_
+  // adg's own confidence-interval fields would support a more rigorous
+  // version of this later if false positives turn out to be a problem).
+  var ADG_DROP_ALERT_THRESHOLD = 0.7;
+  function detectAdgWarning(rows, treatment, treatmentLabel){
+    var treatRows = rows.filter(function(r){ return r.treatment_group === treatment; })
+      .sort(function(a, b){ return a.snapshot_date - b.snapshot_date; });
+    if (treatRows.length < 6) return null; // not enough history yet to judge a trend
+    var recentCount = Math.max(3, Math.floor(treatRows.length / 3));
+    var recent = treatRows.slice(-recentCount);
+    var baseline = treatRows.slice(0, treatRows.length - recentCount);
+    if (!baseline.length) return null;
+    var recentAvg = recent.reduce(function(s, r){ return s + r.rolling_adg; }, 0) / recent.length;
+    var baselineAvg = baseline.reduce(function(s, r){ return s + r.rolling_adg; }, 0) / baseline.length;
+    if (recentAvg < 0) {
+      return { treatmentLabel: treatmentLabel, reason: 'losing weight recently (' + Math.round(recentAvg) + ' g/day)' };
+    }
+    if (baselineAvg > 0 && recentAvg < baselineAvg * ADG_DROP_ALERT_THRESHOLD) {
+      var pctDrop = Math.round((1 - recentAvg / baselineAvg) * 100);
+      return { treatmentLabel: treatmentLabel, reason: 'growth rate down ' + pctDrop + '% on its recent trend (' + Math.round(recentAvg) + ' vs ' + Math.round(baselineAvg) + ' g/day)' };
+    }
+    return null;
+  }
+
+  // ============================================================
+  // RENDER HELPERS
+  // ============================================================
+  // 8/8 addition: colour a line segment by whether it sits above or below
+  // zero (used for the ADG advantage chart), copied from page-5-data.html's
+  // segmentColorBySign() so both charts shade the same way.
+  function segmentColorBySign(ctx, positiveColor, negativeColor){
+    var y0 = ctx.p0.parsed.y, y1 = ctx.p1.parsed.y;
+    return ((y0 + y1) / 2) < 0 ? negativeColor : positiveColor;
+  }
+  // 8/12 polish — unit-aware tooltip/axis formatting. Every chart on this
+  // page previously showed Chart.js's raw default tooltip ("412.3", no
+  // unit) and raw axis ticks — fine for someone who already knows what
+  // they're looking at, not for a professional-reading dashboard. Two
+  // formatters: formatChartValue() for tooltips (rich — sign, unit,
+  // thousands separator where relevant) and formatAxisTick() for the axis
+  // itself (terser — the card title already states the unit, so the axis
+  // only needs enough to disambiguate cost/weight ticks from a bare number).
+  function formatChartValue(value, unit){
+    if (value == null || isNaN(value)) return '–';
+    switch (unit) {
+      case 'kg': return Math.round(value).toLocaleString() + ' kg';
+      case 'gday': return (value >= 0 ? '+' : '') + Math.round(value).toLocaleString() + ' g/day';
+      case 'aud': return '$' + value.toFixed(2);
+      case 'blocks': return Math.round(value).toLocaleString() + ' blocks';
+      default: return String(value);
+    }
+  }
+  function formatAxisTick(value, unit){
+    switch (unit) {
+      case 'kg': return Math.round(value) + 'kg';
+      case 'aud': return '$' + value.toFixed(2);
+      default: return Math.round(value);
+    }
+  }
+  function lineChart(canvasId, labels, datasets, unit){
+    // 8/8 fix: default spanGaps:true on every dataset so a missing reading
+    // on one date doesn't visually break the line — caller can still pass
+    // an explicit spanGaps to override.
+    var styled = datasets.map(function(d){
+      var merged = { spanGaps: true };
+      for (var k in d) merged[k] = d[k];
+      return merged;
+    });
+    return new Chart(document.getElementById(canvasId), {
+      type: 'line',
+      data: { labels: labels, datasets: styled },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        // 8/12 polish — mode:'index'/intersect:false means hovering
+        // anywhere on the x-axis shows every series at that date together
+        // (e.g. SeaFeed AND Control at once), not just whichever line the
+        // cursor happens to be nearest to — the natural way to read a
+        // comparison chart with two series.
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: styled.length > 1, position: 'top', align: 'end', labels: { boxWidth: 6, usePointStyle: true, pointStyle: 'circle', font: { size: 10 }, color: '#73818c' } },
+          tooltip: {
+            callbacks: {
+              label: function(ctx){
+                var prefix = (styled.length > 1 && ctx.dataset.label) ? ctx.dataset.label + ': ' : '';
+                return prefix + formatChartValue(ctx.parsed.y, unit);
+              }
+            }
+          }
+        },
+        scales: {
+          // 8/8 pt.2: border:{display:false} switches off the axis line
+          // Chart.js draws by default even when the grid itself is hidden
+          // — minimal chart chrome per the dashboard-design skill.
+          x: { ticks: { font: { size: 9 }, maxTicksLimit: 6, color: '#73818c' }, grid: { display: false }, border: { display: false } },
+          y: { ticks: { font: { size: 9 }, color: '#73818c', callback: function(value){ return formatAxisTick(value, unit); } }, grid: { color: '#eef2f4' }, border: { display: false } }
+        },
+        elements: { point: { radius: 0 }, line: { tension: 0.3, borderWidth: 2 } }
+      }
+    });
+  }
+  function barChart(canvasId, labels, values, colors){
+    return new Chart(document.getElementById(canvasId), {
+      type: 'bar',
+      data: { labels: labels, datasets: [{ data: values, backgroundColor: colors, borderRadius: 4, maxBarThickness: 42 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { font: { size: 9 }, color: '#73818c' }, grid: { display: false }, border: { display: false } },
+          y: { ticks: { font: { size: 9 }, color: '#73818c' }, grid: { color: '#eef2f4' }, border: { display: false } }
+        }
+      }
+    });
+  }
+
+  // ============================================================
+  // ECONOMIC FEASIBILITY CALCULATOR (embedded) — 8/10 rebuild (Jono's
+  // request): was a link out to page-7-calculator.html, now built
+  // directly into the portal. Same "weight" mode math as that page's
+  // calc() function, simplified to one mode with no toggles. calcAdgUplift
+  // / calcIncrementalCostPerHeadDay are set once from this farm's own
+  // econ data (see initFeasibilityCalculator() below) and reused on every
+  // recalculation — they don't change as the farmer edits the other
+  // fields, only the SeaFeed uplift the trial has actually measured does.
+  // ============================================================
+  var calcAdgUplift = null;
+  var calcIncrementalCostPerHeadDay = null;
+
+  function calcFeasibility(){
+    var herd = parseFloat(document.getElementById('calc-herd').value) || 0;
+    var cw = parseFloat(document.getElementById('calc-current-weight').value) || 0;
+    var tw = parseFloat(document.getElementById('calc-target-weight').value) || 0;
+    var adgBau = parseFloat(document.getElementById('calc-adg').value) || 0;
+    var matureWeight = parseFloat(document.getElementById('calc-mature-weight').value) || 0;
+    var copPerKgBau = parseFloat(document.getElementById('calc-cop').value) || 0;
+    var salePrice = parseFloat(document.getElementById('calc-price').value) || 0;
+
+    var noteEl = document.getElementById('calc-note');
+    var resultsEl = document.getElementById('calc-results');
+
+    if (calcAdgUplift == null) {
+      noteEl.textContent = 'Not enough trial data yet to run this calculator.';
+      resultsEl.style.display = 'none';
+      return;
+    }
+    if (tw <= cw) {
+      noteEl.textContent = 'Target sale weight must be above current weight.';
+      resultsEl.style.display = 'none';
+      return;
+    }
+    if (adgBau <= 0 || herd <= 0) {
+      noteEl.textContent = 'Check your inputs: herd size and growth rate must be greater than zero.';
+      resultsEl.style.display = 'none';
+      return;
+    }
+    if (matureWeight <= tw) {
+      noteEl.textContent = 'Assumed mature weight must be above your target sale weight.';
+      resultsEl.style.display = 'none';
+      return;
+    }
+
+    var adgSea = adgBau + calcAdgUplift;
+    var copDayBau = copPerKgBau * adgBau;
+    var copDaySea = copDayBau + calcIncrementalCostPerHeadDay;
+
+    // 8/12 retrofit (Jono's request — "make number 1 as true a projection
+    // as possible"): was gap/adg straight-line division. Now uses the same
+    // Gompertz growth-curve model as the live Sale readiness card above
+    // (see daysToTargetGompertz()'s header comment) so a producer exploring
+    // scenarios here gets the same, more realistic answer — growth slows
+    // as the animal nears the assumed mature weight, it doesn't hold today's
+    // rate constant all the way to target. Per-day cost rate (copDayBau/
+    // copDaySea) is still treated as constant over the (now longer, more
+    // accurate) projection — a deliberate simplification, see header comment.
+    var daysBau = daysToTargetGompertz(cw, adgBau, matureWeight, tw);
+    var daysSea = daysToTargetGompertz(cw, adgSea > 0 ? adgSea : 0.01, matureWeight, tw);
+    if (daysBau == null || daysSea == null) {
+      noteEl.textContent = 'Check your inputs: can\'t project a growth curve from these numbers.';
+      resultsEl.style.display = 'none';
+      return;
+    }
+    var totalCopBau = copDayBau * daysBau;
+    var totalCopSea = copDaySea * daysSea;
+    var netSavingHerd = (totalCopBau - totalCopSea) * herd;
+    var daysDiff = Math.round(daysBau - daysSea);
+    var heroPositive = daysDiff > 0;
+
+    document.getElementById('calc-days-value').textContent = (heroPositive ? daysDiff : 0) + ' days sooner';
+    document.getElementById('calc-days-caption').textContent = heroPositive
+      ? ('to reach ' + tw + 'kg than business as usual')
+      : 'no turnoff advantage at these inputs';
+
+    // 8/10 fix (Jono's request): was var(--tf-mint-600)/--tf-coral-500 —
+    // coral-500 (#d85a30) reads as orange, not red, and could be
+    // misread as a warning even when netSavingHerd was actually
+    // positive. Uses the same MINT/RED constants as every other accent
+    // colour on this page instead, for an unambiguous ahead/behind read.
+    var savingEl = document.getElementById('calc-saving-value');
+    savingEl.textContent = '$' + Math.round(Math.abs(netSavingHerd)).toLocaleString();
+    savingEl.style.color = netSavingHerd >= 0 ? MINT : RED;
+    // 8/10 fix (Jono's request): "$X more" alone read ambiguously — could
+    // sound like "more saved" as easily as "costs more". Spelled out
+    // explicitly instead so the red/green colour and the words always
+    // agree with each other.
+    document.getElementById('calc-saving-caption').textContent = (netSavingHerd >= 0 ? 'saved' : 'extra cost') + ', net across this ' + herd.toLocaleString() + '-head herd';
+
+    noteEl.textContent = '';
+    resultsEl.style.display = 'flex';
+  }
+
+  // Reuses page-7-calculator.html's own MLA sale-price lookup so the
+  // portal's figure agrees with the full calculator's — runs
+  // independently of the main data load (a failure here shouldn't block
+  // anything else), and just recalculates once it resolves.
+  function fetchIndicativeSalePrice(){
+    var MLA_URL = "https://api-mlastatistics.mla.com.au/report/5";
+    var MLA_INDICATOR_ID = 4;
+    var from = new Date();
+    from.setDate(from.getDate() - 14);
+    var params = new URLSearchParams({ indicatorID: String(MLA_INDICATOR_ID), fromDate: from.toISOString().slice(0, 10) });
+    return fetch(MLA_URL + "?" + params).then(function(res){ return res.json(); }).then(function(data){
+      if (!data.data || !data.data.length) return null;
+      var latest = data.data[data.data.length - 1];
+      return latest.indicator_value / 100;
+    }).catch(function(err){ console.error('MLA price fetch failed:', err); return null; });
+  }
+
+  function initFeasibilityCalculator(seafeedEcon, controlEcon, controlWeight){
+    // SeaFeed uplift, farm-specific (falls back to trial-wide automatically
+    // since seafeedEcon/controlEcon already carry whichever fetchEconForFarm()
+    // resolved to — no separate fetch needed here).
+    if (seafeedEcon && controlEcon &&
+        seafeedEcon.weight_gain_kg_per_head != null && controlEcon.weight_gain_kg_per_head != null &&
+        seafeedEcon.days_of_data && controlEcon.days_of_data &&
+        seafeedEcon.cost_per_head_aud != null && controlEcon.cost_per_head_aud != null) {
+      var calcDays = Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data);
+      calcAdgUplift = (seafeedEcon.weight_gain_kg_per_head - controlEcon.weight_gain_kg_per_head) / calcDays;
+      calcIncrementalCostPerHeadDay = (seafeedEcon.cost_per_head_aud - controlEcon.cost_per_head_aud) / calcDays;
+    }
+
+    // Pre-fill the "business as usual" (Control) baseline inputs with this
+    // farm's own numbers — see the card's HTML comment for why Control,
+    // not SeaFeed.
+    if (controlEcon && controlEcon.representative_head_count) {
+      document.getElementById('calc-herd').value = controlEcon.representative_head_count;
+    }
+    // Target sale weight (8/10 fix, Jono's request): fixed default of
+    // 480kg, matching page-7-calculator.html's own static default —
+    // deliberately NOT derived from current weight (was cwVal + 100),
+    // which produced an inconsistent, farm-dependent target instead of a
+    // predictable one the farmer can always expect and adjust from.
+    var cwVal = null;
+    if (controlWeight && controlWeight.rolling_weight_14d != null) {
+      cwVal = Math.round(controlWeight.rolling_weight_14d);
+      document.getElementById('calc-current-weight').value = cwVal;
+    }
+    document.getElementById('calc-target-weight').value = 480;
+    if (controlEcon && controlEcon.weight_gain_kg_per_head != null && controlEcon.days_of_data) {
+      var baseAdg = controlEcon.weight_gain_kg_per_head / controlEcon.days_of_data;
+      if (baseAdg > 0) document.getElementById('calc-adg').value = baseAdg.toFixed(2);
+    }
+    // 8/10 fix (bug found investigating "why does this show a loss when
+    // the full calculator shows a profit"): cost_per_kg_gain_aud is the
+    // LICK BLOCK's own cost per kg of gain, not the farm's total cost of
+    // production — using it here as the whole-farm COP baseline made
+    // SeaFeed's correctly-calculated incremental cost look huge next to
+    // an artificially tiny baseline, producing a bogus loss. There's no
+    // trial data source for a farm's actual total COP (that's exactly why
+    // page-7-calculator.html always leaves this field as a manually-
+    // entered assumption with an MLA link, never trial-derived) — left at
+    // its generic default here for the same reason, not farm-prefilled.
+
+    ['calc-herd', 'calc-current-weight', 'calc-target-weight', 'calc-adg', 'calc-mature-weight', 'calc-cop', 'calc-price'].forEach(function(id){
+      document.getElementById(id).addEventListener('input', calcFeasibility);
+    });
+
+    // "Open the full calculator" carries the same pre-filled figures
+    // through via page-7-calculator.html's own applyPortalPrefill() (see
+    // that page), so switching to the full version doesn't lose context.
+    var fullLinkParams = new URLSearchParams();
+    if (controlEcon && controlEcon.representative_head_count) fullLinkParams.set('herdSize', controlEcon.representative_head_count);
+    if (cwVal != null) fullLinkParams.set('currentWeight', cwVal);
+    if (controlEcon && controlEcon.weight_gain_kg_per_head != null && controlEcon.days_of_data) {
+      var fullLinkAdg = controlEcon.weight_gain_kg_per_head / controlEcon.days_of_data;
+      if (fullLinkAdg > 0) fullLinkParams.set('adgValue', fullLinkAdg.toFixed(2));
+    }
+    // copPerKg deliberately NOT passed through — see the fix note above,
+    // same reasoning applies to the full calculator's own COP field.
+    fullLinkParams.set('farm', FARM);
+    document.getElementById('calc-full-link').href = 'page-7-calculator.html?' + fullLinkParams.toString();
+
+    calcFeasibility();
+
+    fetchIndicativeSalePrice().then(function(price){
+      if (price == null) return;
+      document.getElementById('calc-price').value = price.toFixed(2);
+      calcFeasibility();
+    });
+  }
+
+  // ============================================================
+  // INIT
+  // ============================================================
+  document.getElementById('pp-farm-name').textContent = FARM;
+  // 8/12 polish: each farmer gets their own private ?farm= link, but the
+  // browser tab/bookmark title was static regardless of which farm loaded
+  // — indistinguishable in a tab bar or bookmarks list if a farmer (or
+  // Jono, testing multiple links) has more than one portal link open.
+  document.title = FARM + ' | Producer Portal | Low Emissions Livestock';
+
+  Promise.all([
+    fetchGwp(),
+    fetchCurrentWeight(),
+    fetchEconForFarm(),
+    fetchEmissionsForFarm(),
+    fetchWeightHistory(),
+    fetchAdgHistory(),
+    fetchCostHistory(),
+    fetchLickBlockHistory(),
+    fetchTrialWideEmissions(),
+    fetchTrialWideAdg(),
+    fetchLickBlockOrders(),
+    fetchAdgTrendHistory()
+  ]).then(function(results){
+    var weight = results[1], econ = results[2], emissionsResult = results[3],
+        weightHistory = results[4], adgHistory = results[5], costHistory = results[6],
+        lickBlockHistory = results[7], trialEmissions = results[8], trialAdg = results[9],
+        lickBlockOrders = results[10], adgTrendHistory = results[11];
+
+    // --- Current weight (split by treatment, 7/8) ---
+    // 8/10: dropped the "14-day rolling average, as at [date]" note per
+    // Jono's request — the split KPI values speak for themselves.
+    var seafeedWeight = weight.seafeed, controlWeight = weight.control;
+    document.getElementById('kpi-weight-seafeed').textContent = seafeedWeight && seafeedWeight.rolling_weight_14d != null
+      ? Math.round(seafeedWeight.rolling_weight_14d) + ' kg' : '–';
+    document.getElementById('kpi-weight-control').textContent = controlWeight && controlWeight.rolling_weight_14d != null
+      ? Math.round(controlWeight.rolling_weight_14d) + ' kg' : '–';
+
+    // --- ADG vs control (economics_data, per-treatment, farm-filtered
+    //     with trial-wide fallback) — 8/10 rebuild (Jono's request): main
+    //     figure is now a % advantage over Control, matching page-2-
+    //     farms.html's fetchEconLatest()/loadBanner() exactly (falls back
+    //     to the g/day figure if Control's own ADG is zero/negative, since
+    //     a % against a non-positive baseline is meaningless). Dropped the
+    //     note and detail lines entirely per Jono's request — just the
+    //     number now. 8/10 pass 2: this is now the widened hero KPI (see
+    //     .pp-kpi-hero) — the single clearest "is it working" signal leads
+    //     the page. Colour now uses MINT/RED directly (was the softer
+    //     var(--tf-mint-600)/var(--tf-coral-500)) to match every other
+    //     ahead/behind indicator on the page exactly. ---
+    var seafeedEcon = econ.seafeed, controlEcon = econ.control;
+    var adgEl = document.getElementById('kpi-adg');
+    var adgCardEl = document.getElementById('kpi-adg-card');
+    var adgBadgeEl = document.getElementById('kpi-adg-badge');
+    if (seafeedEcon && controlEcon &&
+        seafeedEcon.weight_gain_kg_per_head != null && controlEcon.weight_gain_kg_per_head != null &&
+        seafeedEcon.days_of_data && controlEcon.days_of_data) {
+      var adgDaysOfData = Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data);
+      var diffGramsPerDay = ((seafeedEcon.weight_gain_kg_per_head - controlEcon.weight_gain_kg_per_head) / adgDaysOfData) * 1000;
+      var controlGPerDay = (controlEcon.weight_gain_kg_per_head / adgDaysOfData) * 1000;
+      if (controlGPerDay > 0) {
+        var pctAdvantage = (diffGramsPerDay / controlGPerDay) * 100;
+        adgEl.textContent = (pctAdvantage >= 0 ? '+' : '') + pctAdvantage.toFixed(1) + '%';
+      } else {
+        adgEl.textContent = (diffGramsPerDay >= 0 ? '+' : '') + Math.round(diffGramsPerDay) + ' g/day';
+      }
+      var adgAhead = diffGramsPerDay >= 0;
+      adgEl.style.color = adgAhead ? MINT : RED;
+      // 8/12 polish (Jono's request — "distinguish the data... first up in
+      // contrasting colours"): border strip + text badge repeat the same
+      // ahead/behind read the value's own colour already gives, so the
+      // page's single most important number is unmistakable even at a
+      // glance — see .pp-kpi-hero's CSS comment for the full reasoning.
+      adgCardEl.style.borderLeftColor = adgAhead ? MINT : RED;
+      adgBadgeEl.textContent = (adgAhead ? '▲ Ahead of Control' : '▼ Behind Control');
+      adgBadgeEl.className = 'pp-kpi-badge ' + (adgAhead ? 'ahead' : 'behind');
+      adgBadgeEl.style.display = 'inline-flex';
+    } else {
+      adgEl.textContent = '–';
+    }
+
+    // --- Cost of production (split by treatment — Jono's request, 8/8
+    //     pt.2). Same fields already fetched for the ADG card above, just
+    //     rendered per-treatment instead of SeaFeed-only. ---
+    document.getElementById('kpi-cop-seafeed').textContent = (seafeedEcon && seafeedEcon.cost_per_kg_gain_aud != null)
+      ? '$' + seafeedEcon.cost_per_kg_gain_aud.toFixed(2) : '–';
+    document.getElementById('kpi-cop-control').textContent = (controlEcon && controlEcon.cost_per_kg_gain_aud != null)
+      ? '$' + controlEcon.cost_per_kg_gain_aud.toFixed(2) : '–';
+    var copNoteEl = document.getElementById('kpi-cop-note');
+    if (seafeedEcon && seafeedEcon.cost_per_kg_gain_aud != null) {
+      copNoteEl.textContent = '$/kg liveweight gain, trial-to-date' + (econ.usedFallback ? ', trial-wide figure' : '');
+    } else {
+      copNoteEl.textContent = 'Not enough data yet';
+    }
+
+    // --- Methane abatement ---
+    var abatementNoteEl = document.getElementById('kpi-abatement-note');
+    if (emissionsResult.data && emissionsResult.data.abatement_rate != null) {
+      document.getElementById('kpi-abatement').textContent = emissionsResult.data.abatement_rate.toFixed(1) + '%';
+      abatementNoteEl.textContent = emissionsResult.usedFallback ? 'Trial-wide figure: farm-level data not yet available' : '';
+    } else {
+      document.getElementById('kpi-abatement').textContent = '–';
+    }
+
+    // --- Sale readiness projection — 8/12 addition (Jono's request: "as
+    //     true a projection as possible... use existing research to apply
+    //     this weight curve"). Uses each treatment's own live current
+    //     weight and own trial-to-date growth rate (same Economics-based
+    //     ADG figure as the KPI card/calculator, kept consistent rather
+    //     than introducing a second ADG figure here) as the Gompertz
+    //     curve's starting point — see daysToTargetGompertz()'s header
+    //     comment for the model itself and ASSUMED_MATURE_WEIGHT_KG's
+    //     comment for why that assumption is surfaced, not hidden.
+    //     8/12 refinement (Jono's request — "use the ADG data that the %
+    //     figure is drawing from"): was dividing each treatment by its OWN
+    //     days_of_data, which can genuinely differ between SeaFeed and
+    //     Control (different data-completeness windows) — the "ADG vs
+    //     control" hero KPI above never does this, it always divides BOTH
+    //     treatments by the shared min(seafeedEcon.days_of_data,
+    //     controlEcon.days_of_data) so the two are compared over the exact
+    //     same window. saleAdgDaysOfData below matches that same
+    //     computation, so this projection's ADG input can't quietly
+    //     disagree with the number the hero KPI is already showing. ---
+    var saleAdgDaysOfData = (seafeedEcon && controlEcon && seafeedEcon.days_of_data && controlEcon.days_of_data)
+      ? Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data) : null;
+    function renderSaleReadiness(prefix, weightRow, econRow, treatmentLabel){
+      var dateEl = document.getElementById(prefix + '-date');
+      var daysEl = document.getElementById(prefix + '-days');
+      var noteEl = document.getElementById(prefix + '-note');
+      if (!weightRow || weightRow.rolling_weight_14d == null || !econRow || econRow.weight_gain_kg_per_head == null || !saleAdgDaysOfData) {
+        noteEl.textContent = 'Not enough data yet';
+        return null;
+      }
+      var w0 = weightRow.rolling_weight_14d;
+      var adg0 = econRow.weight_gain_kg_per_head / saleAdgDaysOfData;
+      if (w0 >= SALE_TARGET_WEIGHT_KG) {
+        dateEl.textContent = 'Reached';
+        daysEl.textContent = '–';
+        noteEl.textContent = 'Already at or above ' + SALE_TARGET_WEIGHT_KG + 'kg';
+        return { treatmentLabel: treatmentLabel, days: 0 };
+      }
+      var days = daysToTargetGompertz(w0, adg0, ASSUMED_MATURE_WEIGHT_KG, SALE_TARGET_WEIGHT_KG);
+      if (days == null) {
+        noteEl.textContent = adg0 <= 0 ? 'No growth recorded, can’t project' : 'Can’t project with current assumptions';
+        return null;
+      }
+      var targetMs = Date.now() + days * 86400000;
+      dateEl.textContent = fmtDate(targetMs);
+      daysEl.textContent = days + ' days';
+      noteEl.textContent = 'from ' + Math.round(w0) + 'kg at ' + adg0.toFixed(2) + ' kg/day today';
+      return { treatmentLabel: treatmentLabel, days: days };
+    }
+    var saleSf = renderSaleReadiness('sale-sf', seafeedWeight, seafeedEcon, 'Treatment');
+    var saleCt = renderSaleReadiness('sale-ct', controlWeight, controlEcon, 'Control');
+    // 8/12 polish (Jono's request — "figures I want to see as a farmer
+    // first up"): this is the single most decision-relevant number in the
+    // whole card ("how much sooner can I sell with SeaFeed") — promoted
+    // out of the footnote sentence into its own mint-tinted stat banner
+    // (see .pp-sale-advantage's CSS comment), footnote now only carries
+    // the methodology/assumption note.
+    if (saleSf && saleCt && saleSf.days > 0 && saleCt.days > 0) {
+      var soonerDays = saleCt.days - saleSf.days;
+      var saleAdvantageEl = document.getElementById('sale-advantage');
+      if (soonerDays > 0) {
+        saleAdvantageEl.textContent = '▲ Treatment reaches ' + SALE_TARGET_WEIGHT_KG + 'kg ' + soonerDays + ' days sooner than Control at these rates';
+        saleAdvantageEl.style.display = 'flex';
+      }
+    }
+    document.getElementById('sale-footnote').textContent =
+      'Projects to ' + SALE_TARGET_WEIGHT_KG + 'kg using a growth-curve model (Gompertz) that slows each animal’s growth as it nears an assumed mature weight of ' + ASSUMED_MATURE_WEIGHT_KG + 'kg, an estimate, not a trial measurement.';
+
+    // --- Farm vs trial average (ADG) ---
+    if (seafeedEcon && controlEcon && seafeedEcon.days_of_data && controlEcon.days_of_data) {
+      var farmDays = Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data);
+      var farmDiff = ((seafeedEcon.weight_gain_kg_per_head - controlEcon.weight_gain_kg_per_head) / farmDays) * 1000;
+      // 8/12 fix: was missing the "g/day" unit — read as a bare number
+      // ("Bowood Farm +142 · trial avg +130") next to a card whose other
+      // row (methane abatement) does carry its "%" unit. Both rows should
+      // read the same way at a glance.
+      var trialAdgLabel = trialAdg != null ? (trialAdg >= 0 ? '+' : '') + Math.round(trialAdg) + ' g/day' : 'n/a';
+      var span = trialAdg != null ? Math.max(Math.abs(farmDiff), Math.abs(trialAdg), 1) : Math.max(Math.abs(farmDiff), 1);
+      var adgFillPct = Math.min(100, Math.max(0, 50 + (farmDiff / span) * 50));
+      document.getElementById('compare-adg-label').textContent =
+        FARM + ' ' + (farmDiff >= 0 ? '+' : '') + Math.round(farmDiff) + ' g/day · trial avg ' + trialAdgLabel;
+      var adgFillEl = document.getElementById('compare-adg-fill');
+      adgFillEl.style.width = adgFillPct + '%';
+      adgFillEl.setAttribute('aria-valuenow', Math.round(adgFillPct));
+      // 8/12 fix (Jono's request — "distinguish the data in contrasting
+      // colours"): was always mint regardless of direction — see
+      // .pp-compare-fill's CSS comment. Same farmDiff>=0 threshold the
+      // hero ADG KPI already uses (this is the same underlying SeaFeed-
+      // vs-Control diff, just farm-only), so "green" means the same thing
+      // everywhere it appears on the page.
+      adgFillEl.style.background = farmDiff >= 0 ? MINT : RED;
+    }
+
+    // --- Farm vs trial average (Methane abatement) — 8/8 addition, now
+    //     that LEL_Emissions_Data_view exposes farm_name this can finally
+    //     be compared the same way ADG already is, instead of the static
+    //     "not split by farm yet" note this card used to carry. Only shown
+    //     meaningfully when this farm has its OWN reading (not the
+    //     fallback trial figure) — otherwise "farm vs trial" would just be
+    //     the trial figure compared to itself. ---
+    if (!emissionsResult.usedFallback && emissionsResult.data && emissionsResult.data.abatement_rate != null && trialEmissions && trialEmissions.abatement_rate != null) {
+      var farmAbatement = emissionsResult.data.abatement_rate, trialAbatement = trialEmissions.abatement_rate;
+      document.getElementById('compare-abatement-label').textContent =
+        FARM + ' ' + farmAbatement.toFixed(1) + '% · trial avg ' + trialAbatement.toFixed(1) + '%';
+      var abatementSpan = Math.max(farmAbatement, trialAbatement, 1) * 1.15;
+      var abatementFillPct = Math.min(100, Math.max(0, (farmAbatement / abatementSpan) * 100));
+      var abatementFillEl = document.getElementById('compare-abatement-fill');
+      abatementFillEl.style.width = abatementFillPct + '%';
+      abatementFillEl.setAttribute('aria-valuenow', Math.round(abatementFillPct));
+      // 8/12 fix — same reasoning as the ADG bar above, but there's no
+      // natural zero-crossing for a % abatement figure, so the meaningful
+      // comparison here is against the trial average itself, not zero.
+      abatementFillEl.style.background = farmAbatement >= trialAbatement ? MINT : RED;
+    } else {
+      document.getElementById('compare-abatement-label').textContent = 'Trial-wide only for now';
+    }
+
+    // --- Cumulative abatement + CO2-e + illustrative value (formula from
+    //     farms-illustrative-carbon-value.html). CO2-e is Jono's 8/8 pt.2
+    //     addition — the number already existed as an intermediate step in
+    //     the illustrative-value maths but was never shown on its own. ---
+    if (seafeedEcon && seafeedEcon.cumulative_ch4_abated_kg_per_head != null && seafeedEcon.representative_head_count != null) {
+      var totalKgCh4 = seafeedEcon.cumulative_ch4_abated_kg_per_head * seafeedEcon.representative_head_count;
+      var totalTonnesCo2e = (totalKgCh4 * GWP) / 1000;
+      var illustrativeValue = totalTonnesCo2e * REFERENCE_PRICE_AUD_PER_TONNE;
+      document.getElementById('cum-ch4').textContent = Math.round(totalKgCh4).toLocaleString() + ' kg';
+      document.getElementById('cum-co2e').textContent = totalTonnesCo2e.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' t CO2-e';
+      document.getElementById('cum-value').textContent = '$' + illustrativeValue.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+
+    // --- Weight trend chart (SeaFeed vs Control — 8/8 pt.2, see
+    //     fetchWeightHistory()'s comment for why. Date-keyed join, same
+    //     pattern as the cost trend chart below, so a date only one
+    //     treatment has a reading for doesn't misalign the other series.) ---
+    if (weightHistory.length) {
+      var weightByDate = {};
+      weightHistory.forEach(function(r){
+        if (!weightByDate[r.snapshot_date]) weightByDate[r.snapshot_date] = {};
+        weightByDate[r.snapshot_date][r.treatment_group] = r.rolling_weight_14d;
+      });
+      var weightDatesArr = Object.keys(weightByDate).map(Number).sort(function(a, b){ return a - b; });
+      lineChart('chart-weight', weightDatesArr.map(fmtDate), [
+        { label: 'Treatment', data: weightDatesArr.map(function(d){ return weightByDate[d].seafeed != null ? weightByDate[d].seafeed : null; }), borderColor: MINT, backgroundColor: 'transparent' },
+        { label: 'Control', data: weightDatesArr.map(function(d){ return weightByDate[d].control != null ? weightByDate[d].control : null; }), borderColor: SLATE, backgroundColor: 'transparent' }
+      ], 'kg');
+    } else { document.getElementById('chart-weight-empty').style.display = 'block'; }
+
+    // --- ADG trend chart (single "ADG advantage" line, same LEL_Economics_
+    //     Data formula as the KPI card above — see fetchAdgHistory()'s 8/8
+    //     comment for why this replaced the old two-line rolling_adg chart.
+    //     Shaded red for any segment where SeaFeed is behind Control, mint
+    //     where it's ahead, matching page-5-data.html's own chart. ---
+    if (adgHistory.rows.length) {
+      lineChart('chart-adg',
+        adgHistory.rows.map(function(r){ return fmtDate(r.date); }),
+        [{
+          // 8/12 polish: label shortened from "ADG advantage (g/day)" —
+          // the unit now comes from formatChartValue('gday') in the
+          // tooltip itself, so keeping it in the label too just repeated
+          // "g/day" twice on every hover. Card title above the chart
+          // still states the unit for anyone scanning without hovering.
+          label: 'ADG advantage',
+          data: adgHistory.rows.map(function(r){ return r.diff; }),
+          borderColor: MINT, backgroundColor: 'rgba(58,169,137,0.12)',
+          fill: { target: { value: 0 } },
+          segment: {
+            borderColor: function(ctx){ return segmentColorBySign(ctx, MINT, RED); },
+            backgroundColor: function(ctx){ return segmentColorBySign(ctx, 'rgba(58,169,137,0.12)', 'rgba(192,57,43,0.12)'); }
+          }
+        }], 'gday');
+    } else { document.getElementById('chart-adg-empty').style.display = 'block'; }
+
+    // --- Cost of production trend chart ---
+    // 8/8 fix: previously built one deduped label list from BOTH treatments
+    // combined, then plotted each treatment's values in their own filtered
+    // order — positionally misaligned (and silently wrong) whenever the two
+    // treatments didn't have data on exactly the same dates. Now keyed by
+    // the raw calculation_date so each series lines up with the correct
+    // date, with null (not a mismatched value) where a treatment has no
+    // reading — spanGaps:true (set in lineChart()) draws through those.
+    // 8/8 pt.2: SeaFeed's line switched from coral to MINT — coral is this
+    // page's "behind/bad" colour, and colouring the SeaFeed series with it
+    // wrongly implied SeaFeed=bad on a chart that isn't a delta/direction
+    // chart, just two treatments' raw cost. MINT/SLATE now consistently
+    // mean "SeaFeed/Control" everywhere on the page, not "good/bad".
+    if (costHistory.length) {
+      var costByDate = {};
+      costHistory.forEach(function(r){
+        if (!costByDate[r.calculation_date]) costByDate[r.calculation_date] = {};
+        costByDate[r.calculation_date][r.treatment] = r.cost_per_kg_gain_aud;
+      });
+      var costDates = Object.keys(costByDate).map(Number).sort(function(a, b){ return a - b; });
+      lineChart('chart-cop', costDates.map(fmtDate), [
+        { label: 'Treatment', data: costDates.map(function(d){ return costByDate[d].seafeed != null ? costByDate[d].seafeed : null; }), borderColor: MINT, backgroundColor: 'transparent' },
+        { label: 'Control', data: costDates.map(function(d){ return costByDate[d].control != null ? costByDate[d].control : null; }), borderColor: SLATE, backgroundColor: 'transparent' }
+      ], 'aud');
+    } else { document.getElementById('chart-cop-empty').style.display = 'block'; }
+
+    // --- Lick block usage over time — 8/10 rebuild (Jono's request):
+    //     replaced the old per-asset snapshot bar chart with a real trend
+    //     line, keyed by snapshot_date the same way the cost/weight charts
+    //     key by calculation_date. History starts 10/8, so early on this
+    //     will only show a few points — that's expected, not a bug. ---
+    if (lickBlockHistory.length) {
+      var lickByDate = {};
+      lickBlockHistory.forEach(function(r){
+        if (!lickByDate[r.snapshot_date]) lickByDate[r.snapshot_date] = {};
+        lickByDate[r.snapshot_date][r.treatment] = r.cumulative_blocks_used;
+      });
+      var lickDates = Object.keys(lickByDate).map(Number).sort(function(a, b){ return a - b; });
+      lineChart('chart-lick', lickDates.map(fmtDate), [
+        { label: 'Treatment', data: lickDates.map(function(d){ return lickByDate[d].seafeed != null ? lickByDate[d].seafeed : null; }), borderColor: MINT, backgroundColor: 'transparent' },
+        { label: 'Control', data: lickDates.map(function(d){ return lickByDate[d].control != null ? lickByDate[d].control : null; }), borderColor: SLATE, backgroundColor: 'transparent' }
+      ], 'blocks');
+    } else { document.getElementById('chart-lick-empty').style.display = 'block'; }
+
+    // --- Lick block reorder forecast — 8/10 addition (Jono's request):
+    //     116 blocks/order (2 pallets x 58), SeaFeed and Control tracked
+    //     as separate countdowns since they're ordered as separate
+    //     pallets, not a shared stock pool. on_hand = blocks ordered to
+    //     date minus the latest cumulative_blocks_used snapshot; rate
+    //     comes straight from that same snapshot's blocks_per_day_current
+    //     (computed in 02. LEL_Lick_Block_Tracker_v2.py from each asset's
+    //     most recent replacement interval, summed per treatment).
+    //     Both inputs start empty (see fetchLickBlockOrders()'s note), so
+    //     this degrades gracefully — no orders yet / no history yet / no
+    //     rate yet all get their own clear message rather than a bogus
+    //     number or a divide-by-zero. 8/10 pass 2: now RETURNS its overdue/
+    //     out-of-stock status instead of only rendering into the card, so
+    //     the alert banner above the KPI row can be built from the exact
+    //     same computation without duplicating the maths. ---
+    var latestLickByTreatment = {};
+    lickBlockHistory.forEach(function(r){
+      var t = r.treatment;
+      if (!latestLickByTreatment[t] || r.snapshot_date > latestLickByTreatment[t].snapshot_date) latestLickByTreatment[t] = r;
+    });
+    var orderedByTreatment = { seafeed: 0, control: 0 };
+    lickBlockOrders.forEach(function(r){
+      if (r.treatment === 'seafeed' || r.treatment === 'control') orderedByTreatment[r.treatment] += (r.blocks_ordered || 0);
+    });
+
+    function renderReorderStat(prefix, treatment, treatmentLabel){
+      var onHandEl = document.getElementById(prefix + '-onhand');
+      var daysEl = document.getElementById(prefix + '-days');
+      var dateEl = document.getElementById(prefix + '-date');
+      var noteEl = document.getElementById(prefix + '-note');
+      var latest = latestLickByTreatment[treatment];
+      var ordered = orderedByTreatment[treatment];
+
+      if (!latest) {
+        noteEl.textContent = 'No usage history yet';
+        return null;
+      }
+      if (!ordered) {
+        noteEl.textContent = 'Log an order in LEL_Lick_Block_Orders to enable predictions';
+        return null;
+      }
+
+      var onHand = ordered - latest.cumulative_blocks_used;
+      onHandEl.textContent = Math.round(onHand).toLocaleString() + ' blocks';
+
+      var rate = latest.blocks_per_day_current;
+      if (!rate || rate <= 0) {
+        noteEl.textContent = 'Not enough consumption data yet to project a rate';
+        return null;
+      }
+
+      var daysToEmpty = onHand / rate;
+      var runOutMs = Date.now() + daysToEmpty * 86400000;
+      var reorderByMs = runOutMs - REORDER_LEAD_DAYS * 86400000;
+      var outOfStock = onHand <= 0;
+      var overdue = reorderByMs <= Date.now() || outOfStock;
+
+      daysEl.textContent = Math.max(0, Math.round(daysToEmpty)) + ' days';
+      dateEl.textContent = fmtDate(reorderByMs);
+      daysEl.classList.toggle('overdue', overdue);
+      dateEl.classList.toggle('overdue', overdue);
+
+      if (outOfStock) {
+        noteEl.textContent = 'Out of stock: order now';
+        noteEl.classList.add('stale');
+      } else if (overdue) {
+        noteEl.textContent = 'Past reorder date: order now';
+        noteEl.classList.add('stale');
+      } else {
+        noteEl.textContent = 'At current rate (' + rate.toFixed(2) + ' blocks/day)';
+      }
+
+      return { treatmentLabel: treatmentLabel, outOfStock: outOfStock, overdue: overdue, daysToEmpty: daysToEmpty };
+    }
+    var reorderStatuses = [
+      renderReorderStat('reorder-sf', 'seafeed', 'Treatment'),
+      renderReorderStat('reorder-ct', 'control', 'Control')
+    ].filter(function(s){ return s && s.overdue; });
+
+    // --- ADG early-warning detection — 8/12 addition (Jono's request,
+    //     recommendation #2). See detectAdgWarning()'s own comment for the
+    //     threshold and reasoning; folded into the same alert banner as
+    //     the lick block reorder alert below rather than a separate UI
+    //     element, so every "needs attention" signal on the page surfaces
+    //     in one place. ---
+    var adgWarnings = [
+      detectAdgWarning(adgTrendHistory, 'seafeed', 'Treatment'),
+      detectAdgWarning(adgTrendHistory, 'control', 'Control')
+    ].filter(Boolean);
+
+    // --- Alert banner — 8/10 addition (Jono's request, farmer-perspective
+    //     redesign), extended 8/12 to also carry ADG early-warnings.
+    //     Shown above the KPI row when at least one treatment needs
+    //     action. Deliberately only fires for genuine urgency (overdue
+    //     reorder/out of stock, or a real ADG drop against the treatment's
+    //     own trend) — "no orders logged yet" or "not enough history yet"
+    //     are onboarding states, not alerts, and showing a banner for
+    //     those on every farm indefinitely would just be noise. ---
+    var alertParts = reorderStatuses.map(function(s){
+      return s.outOfStock
+        ? (s.treatmentLabel + ' is out of stock')
+        : (s.treatmentLabel + ' is past its reorder date');
+    }).concat(adgWarnings.map(function(w){
+      return w.treatmentLabel + ' ' + w.reason + ', worth a check on farm';
+    }));
+    if (alertParts.length) {
+      // 8/12 polish (Jono's request — "easy to use"): now that this banner
+      // can carry BOTH reorder alerts and ADG warnings at once, a single
+      // " · "-joined run-on sentence gets hard to scan past 2 items. One
+      // item still reads as a plain sentence; 2+ break into their own
+      // bulleted line each, matching how a farmer would actually want to
+      // triage a short list of separate things to check.
+      var alertHtml = alertParts.length === 1
+        ? '<strong>Action needed:</strong> ' + alertParts[0] + '.'
+        : '<strong>Action needed:</strong><br>' + alertParts.map(function(p){ return '• ' + p + '.'; }).join('<br>');
+      document.getElementById('pp-alert-text').innerHTML = alertHtml;
+      document.getElementById('pp-alert-banner').style.display = 'flex';
+    }
+
+    // --- Economic feasibility calculator — 8/10 rebuild (Jono's request):
+    //     now embedded and usable inline, not just a link out. See
+    //     initFeasibilityCalculator()'s own comment for the Control-vs-
+    //     SeaFeed reasoning. ---
+    initFeasibilityCalculator(seafeedEcon, controlEcon, controlWeight);
+
+    document.getElementById('pp-status').innerHTML = '<span class="live">Live data</span>, updated ' + new Date().toLocaleDateString();
+  }).catch(function(err){
+    document.getElementById('pp-status').textContent = 'Live data unavailable right now';
+    console.error(err);
+  });
+
+})();
+</script>
+
+</body>
+</html>
