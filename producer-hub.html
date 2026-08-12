@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#041221">
+<title>Producer hub | Low Emissions Livestock trial</title>
+<!--
+  LEL Producer Hub — 8/12 addition, stripped back same day (Jono's
+  request, after the photo-hero version: "strip this back, I don't need
+  any images etc"). Back to a plain, single-column page using farmer-
+  portal-template.html's own design system (same "pp-" classes/tokens),
+  not the full-bleed image-band landing-page layout from the previous
+  pass. Four things only, per Jono's spec:
+    1. Header — clearly this is the producer portal.
+    2. Mission section — what the project is trying to achieve, and how
+       participating farms contribute to that (text only, no imagery).
+    3. Results section — aggregate/trial-wide findings, live.
+    4. Farm picker — log in to your own farm.
+  Order (Jono's call, left to me): mission and results BEFORE the farm
+  picker, picker last. Reasoning: a first-time visitor needs the "what is
+  this and why does it matter" context before "log in to your farm" makes
+  sense as an action; a returning farmer who already knows the story can
+  skip straight down to it since the page is now short (no image bands to
+  scroll past).
+
+  Mission copy is still the same real, already-approved language pulled
+  from page-1-home.html (not invented for this page) — just presented as
+  plain text now, no photo/floating-card treatment.
+
+  JS (fetchers, farm-picker/passcode logic, element ids) is unchanged from
+  the previous version — only the HTML/CSS around it changed in this pass.
+-->
+<style>
+  :root{
+    --tf-navy-900:#041221;
+    --tf-navy-800:oklch(from var(--tf-navy-900) calc(l + 0.08) c h);
+    --tf-slate-400:#a9b8c4;
+    --tf-slate-300:oklch(from var(--tf-slate-400) calc(l + 0.08) c h);
+    --tf-slate-200:oklch(from var(--tf-slate-400) calc(l + 0.14) c h);
+    --tf-slate-100:oklch(from var(--tf-slate-400) calc(l + 0.19) c h);
+    --tf-slate-600:oklch(from var(--tf-slate-400) calc(l - 0.18) c h);
+    --tf-mint-500:#5ec9a8;
+    --tf-mint-600:oklch(from var(--tf-mint-500) calc(l - 0.1) c h);
+    --tf-mint-400:oklch(from var(--tf-mint-500) calc(l + 0.08) c h);
+    --tf-seafeed:#3aa989;
+    --tf-red:#c0392b;
+    --tf-white:#ffffff;
+    --tf-warning:#c98a2e;
+    --surface-page:#faf9f6;
+    --surface-sunken:var(--tf-slate-100);
+    --surface-card:var(--tf-white);
+    --text-heading:var(--tf-navy-900);
+    --text-body:oklch(from var(--tf-navy-900) calc(l + 0.06) calc(c - 0.005) h);
+    --text-muted:var(--tf-slate-600);
+    --border-subtle:var(--tf-slate-200);
+    --border-default:var(--tf-slate-300);
+    --radius-lg:12px; --radius-md:10px; --radius-sm:6px;
+    --shadow-sm:0 1px 2px rgba(4,18,33,0.08);
+    --font-display:Tahoma,Verdana,sans-serif;
+    --font-body:Verdana,Tahoma,sans-serif;
+  }
+  html, body { margin: 0; background: var(--surface-page); }
+  body { font-family: var(--font-body); color: var(--text-body); -webkit-font-smoothing:antialiased; }
+  .pp-page { max-width: 1100px; margin: 0 auto; padding: 28px 32px 64px; box-sizing: border-box; }
+  @media (max-width: 720px) { .pp-page { padding: 20px 16px 48px; } }
+
+  /* ---- Header: this is the producer portal, clearly, up front ---- */
+  .pp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 26px 28px; background: var(--tf-navy-900); border-radius: var(--radius-lg); margin-bottom: 20px; flex-wrap: wrap; }
+  .pp-farm-name { font-family: var(--font-display); font-weight: 700; font-size: 25px; color: var(--tf-white); margin: 0; }
+  .pp-subtitle { font-size: 13.5px; color: rgba(255,255,255,0.55); margin: 4px 0 0 0; }
+  .pp-meta { font-size: 11.5px; color: rgba(255,255,255,0.5); text-align: right; line-height: 1.6; }
+  .pp-meta .live { color: var(--tf-mint-400); font-weight: 700; }
+  .pp-meta .live::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 5px; border-radius: 50%; background: var(--tf-mint-400); animation: pp-pulse 1.8s ease-in-out infinite; }
+  @keyframes pp-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @media (prefers-reduced-motion: reduce) { .pp-meta .live::before { animation: none; } }
+
+  .pp-section-label { font-family: var(--font-display); font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.07em; margin: 0 0 10px 2px; }
+
+  /* ---- Mission: plain text, no imagery ---- */
+  .pp-mission-card { margin-bottom: 20px; }
+  .pp-mission-title { font-family: var(--font-display); font-size: 21px; font-weight: 700; color: var(--text-heading); margin: 0 0 14px 0; line-height: 1.25; }
+  .pp-mission-body { font-size: 14.5px; color: var(--text-body); line-height: 1.75; margin: 0 0 14px 0; }
+  .pp-mission-body:last-of-type { margin-bottom: 0; }
+  .pp-mission-facts { display: flex; gap: 28px; flex-wrap: wrap; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--border-subtle); }
+  .pp-mission-fact-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 4px 0; }
+  .pp-mission-fact-value { font-family: var(--font-display); font-size: 14.5px; font-weight: 700; color: var(--text-heading); margin: 0; }
+
+  /* ---- Shared card system ---- */
+  .pp-kpi-card, .pp-card, .pp-cumulative-card { border-radius: var(--radius-lg); padding: 22px 24px; box-shadow: var(--shadow-sm); box-sizing: border-box; }
+  .pp-kpi-card, .pp-cumulative-card { background: var(--surface-sunken); }
+  .pp-card { background: var(--surface-card); border: 1px solid var(--border-subtle); }
+
+  .pp-kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin-bottom: 20px; }
+  .pp-kpi-label { font-size: 11.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 0 0 8px 0; }
+  .pp-kpi-value { font-family: var(--font-display); font-size: 30px; font-weight: 700; color: var(--text-heading); margin: 0; }
+  .pp-kpi-value.accent { color: var(--tf-seafeed); }
+  .pp-kpi-note { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; }
+  .pp-kpi-split { display: flex; gap: 22px; }
+  .pp-kpi-split-label { font-size: 11px; color: var(--text-muted); margin: 0 0 2px 0; text-transform: uppercase; letter-spacing: 0.03em; }
+  .pp-kpi-split-value { font-family: var(--font-display); font-size: 23px; font-weight: 700; color: var(--text-heading); margin: 0; }
+  .pp-seafeed-value { color: var(--tf-seafeed); }
+
+  .pp-kpi-hero { grid-column: span 2; border-left: 4px solid transparent; }
+  @media (max-width: 720px) { .pp-kpi-hero { grid-column: span 1; } }
+  .pp-kpi-hero .pp-kpi-label { font-size: 12.5px; }
+  .pp-kpi-hero .pp-kpi-value { font-size: 48px; }
+  .pp-kpi-badge { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-display); font-size: 11.5px; font-weight: 700; padding: 3px 10px; border-radius: 999px; margin-top: 10px; }
+  .pp-kpi-badge.ahead { color: var(--tf-seafeed); background: rgba(58,169,137,0.12); }
+  .pp-kpi-badge.behind { color: var(--tf-red); background: rgba(192,57,43,0.12); }
+
+  .pp-cumulative-title { font-size: 13px; color: var(--text-muted); margin: 0 0 12px 0; }
+  .pp-cumulative-row { display: flex; gap: 40px; flex-wrap: wrap; }
+  .pp-cumulative-value { font-family: var(--font-display); font-size: 28px; font-weight: 700; color: var(--text-heading); margin: 0; }
+  .pp-cumulative-sub { font-size: 12px; color: var(--text-muted); margin-top: 4px; max-width: 28ch; }
+
+  /* ---- Find your farm: last section, the action to take ---- */
+  .pp-card-title { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--text-heading); margin: 0 0 8px 0; }
+  .pp-picker-copy { font-size: 13px; color: var(--text-muted); margin: 0 0 18px 0; }
+  .pp-picker-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .pp-picker-row:last-of-type { margin-bottom: 0; }
+  .pp-picker-row select, .pp-picker-row input[type="password"] { font-family: var(--font-body); font-size: 15px; color: var(--text-heading); background: var(--surface-sunken); border: 1px solid var(--tf-slate-200, #dfe6ea); border-radius: var(--radius-sm); padding: 10px 12px; min-width: 220px; box-sizing: border-box; }
+  .pp-picker-row select:focus, .pp-picker-row input[type="password"]:focus { outline: 2px solid var(--tf-mint-400); outline-offset: 1px; }
+  .pp-picker-btn { font-family: var(--font-display); font-size: 14px; font-weight: 700; color: var(--tf-white); background: var(--tf-seafeed); border: none; border-radius: var(--radius-sm); padding: 10px 20px; cursor: pointer; }
+  .pp-picker-btn:hover { background: var(--tf-mint-600); }
+  .pp-picker-btn:disabled { background: var(--tf-slate-300); cursor: not-allowed; }
+  .pp-picker-error { font-size: 12.5px; color: var(--tf-red); font-weight: 700; margin: 10px 0 0 0; min-height: 1em; }
+
+  @keyframes pp-shimmer{ 0%{ background-position:150% 0; } 100%{ background-position:-50% 0; } }
+  .pp-skel { display: inline-block; height: 0.8em; vertical-align: middle; border-radius: 6px; background-size: 250% 100%; animation: pp-shimmer 1.4s ease-in-out infinite; background-image: linear-gradient(90deg, rgba(4,18,33,0.08) 25%, rgba(4,18,33,0.16) 37%, rgba(4,18,33,0.08) 63%); }
+  .pp-skel-lg { width: 128px; }
+  .pp-skel-md { width: 68px; }
+  @media (prefers-reduced-motion: reduce) { .pp-skel { animation: none !important; } }
+
+  .pp-footer { text-align: center; margin-top: 8px; }
+  .pp-footer-note { font-size: 11px; color: var(--text-muted); margin: 0; }
+</style>
+</head>
+<body>
+
+<div class="pp-page">
+
+  <!-- ============ 1. HEADER ============ -->
+  <div class="pp-header">
+    <div>
+      <p class="pp-farm-name">Low Emissions Livestock Trial</p>
+      <p class="pp-subtitle">Producer hub</p>
+    </div>
+    <div class="pp-meta">
+      <span id="pp-status">Loading live data&hellip;</span>
+    </div>
+  </div>
+
+  <!-- ============ 2. MISSION ============
+       What the project is trying to achieve, and how participating farms
+       contribute to that. Real copy, adapted from page-1-home.html's own
+       "why this trial exists" section, plain text now, no image band. -->
+  <p class="pp-section-label">About this trial</p>
+  <div class="pp-card pp-mission-card">
+    <p class="pp-mission-title">Cutting methane from Tasmanian livestock, while keeping farms profitable.</p>
+    <p class="pp-mission-body">Asparagopsis seaweed-based supplements have demonstrated considerable promise in reducing livestock methane emissions under controlled research settings. What remains untested at a commercial scale in Tasmania is whether those benefits hold up on working farms, and at what cost. That is what this trial is testing.</p>
+    <p class="pp-mission-body">Backed by a $4 million grant from the Tasmanian Government, TasFarmers partnered with the Tasmanian Institute of Agriculture, and with Sea Forest as the manufacturer of the supplement, to run the trial on participating farms and capture the data.</p>
+    <p class="pp-mission-body">Every participating farm's results, cost data and herd performance feed directly into this trial. The data your farm generates is what will let every other Tasmanian livestock producer decide, on real evidence rather than a promise, whether this is worth adopting on their own place.</p>
+    <div class="pp-mission-facts">
+      <div><p class="pp-mission-fact-label">Trial start</p><p class="pp-mission-fact-value">19 June 2024</p></div>
+      <div><p class="pp-mission-fact-label">Completion due</p><p class="pp-mission-fact-value">1 February 2029</p></div>
+      <div><p class="pp-mission-fact-label">Reporting</p><p class="pp-mission-fact-value">Every 6 months</p></div>
+      <div><p class="pp-mission-fact-label">Partners</p><p class="pp-mission-fact-value">TasFarmers &middot; Sea Forest &middot; TIA</p></div>
+    </div>
+  </div>
+
+  <!-- ============ 3. RESULTS SO FAR (live, aggregate) ============ -->
+  <p class="pp-section-label">The results so far, all farms</p>
+  <div class="pp-kpi-grid">
+    <div class="pp-kpi-card pp-kpi-hero" id="kpi-adg-card">
+      <p class="pp-kpi-label">Treatment vs control</p>
+      <p class="pp-kpi-value accent" id="kpi-adg"><span class="pp-skel pp-skel-lg"></span></p>
+      <span class="pp-kpi-badge" id="kpi-adg-badge" style="display:none;"></span>
+    </div>
+    <div class="pp-kpi-card">
+      <p class="pp-kpi-label">Cost of production</p>
+      <div class="pp-kpi-split">
+        <div>
+          <p class="pp-kpi-split-label">Treatment</p>
+          <p class="pp-kpi-split-value pp-seafeed-value" id="kpi-cop-seafeed"><span class="pp-skel pp-skel-md"></span></p>
+        </div>
+        <div>
+          <p class="pp-kpi-split-label">Control</p>
+          <p class="pp-kpi-split-value" id="kpi-cop-control"><span class="pp-skel pp-skel-md"></span></p>
+        </div>
+      </div>
+      <p class="pp-kpi-note" id="kpi-cop-note"></p>
+    </div>
+    <div class="pp-kpi-card">
+      <p class="pp-kpi-label">Methane abatement</p>
+      <p class="pp-kpi-value pp-seafeed-value" id="kpi-abatement"><span class="pp-skel pp-skel-md"></span></p>
+      <p class="pp-kpi-note" id="kpi-abatement-note">Across all trial farms</p>
+    </div>
+  </div>
+
+  <div class="pp-cumulative-card" style="margin-bottom: 20px;">
+    <p class="pp-cumulative-title">Cumulative abatement to date, all farms</p>
+    <div class="pp-cumulative-row">
+      <div>
+        <p class="pp-cumulative-value" id="cum-ch4">&ndash;</p>
+        <p class="pp-cumulative-sub">methane (CH4) abated since trial start</p>
+      </div>
+      <div>
+        <p class="pp-cumulative-value" id="cum-co2e">&ndash;</p>
+        <p class="pp-cumulative-sub">CO2-equivalent, GWP100 basis</p>
+      </div>
+      <div>
+        <p class="pp-cumulative-value" id="cum-value">&ndash;</p>
+        <p class="pp-cumulative-sub">illustrative value at $32.50/t midpoint (not an ACCU credit)</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 4. FIND YOUR FARM (last, the action to take) ============ -->
+  <p class="pp-section-label">Find your farm</p>
+  <div class="pp-card">
+    <p class="pp-card-title">View your own results</p>
+    <p class="pp-picker-copy" id="picker-intro">Select your farm, then enter the passcode you've been given to view your farm's own results.</p>
+    <div class="pp-picker-row">
+      <select id="farm-select">
+        <option value="">Choose your farm&hellip;</option>
+      </select>
+    </div>
+    <div class="pp-picker-row" id="passcode-row" style="display:none;">
+      <input type="password" id="farm-passcode" placeholder="Enter your passcode" autocomplete="off">
+      <button class="pp-picker-btn" id="farm-go-btn" type="button">View my farm</button>
+    </div>
+    <p class="pp-picker-error" id="picker-error"></p>
+  </div>
+
+  <div class="pp-footer">
+    <p class="pp-footer-note">Private producer link. Not for public distribution.</p>
+  </div>
+
+</div>
+
+<script>
+(function(){
+
+  // ============================================================
+  // CONFIG — endpoints copied verbatim from farmer-portal-template.html
+  // so this page can't disagree with the numbers shown there.
+  // ============================================================
+  var EMISSIONS_URL = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Emissions_Data_view/FeatureServer/0/query";
+  var ECON_URL       = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Economics_Data/FeatureServer/0/query";
+  var BENCHMARKS_URL = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Industry_Benchmarks/FeatureServer/0/query";
+  var AGGREGATE_LABEL = "All Farms (Trial Aggregate)";
+  var REFERENCE_PRICE_AUD_PER_TONNE = 32.5; // matches farms-illustrative-carbon-value.html
+  var GWP = 28; // AR5 100-yr default, overwritten by fetchGwp() below
+  var MINT = '#3aa989';
+  var RED = '#c0392b';
+
+  // ============================================================
+  // FARM DIRECTORY — see the farm-picker section's own comment below for
+  // the full security note. Add a farm here (farm_name must match every
+  // ArcGIS feature layer's own farm_name value exactly) and set its own
+  // passcode before handing this hub link to that farmer. Passcodes are
+  // plain text and visible to anyone who views this page's source —
+  // deliberate, disclosed to Jono when this page was scoped.
+  // ============================================================
+  var FARMS = [
+    { name: 'Bowood Farm', passcode: '27257262' },
+    { name: 'Eastbourne Farm', passcode: 'CHANGE-ME-EASTBOURNE' },
+    { name: 'TRT Pastoral', passcode: 'CHANGE-ME-TRT' }
+  ];
+
+  function q(url, params){
+    return fetch(url + "?" + new URLSearchParams(params)).then(function(res){ return res.json(); }).then(function(data){
+      if (data.error) throw new Error(data.error.message || "Query failed");
+      return data;
+    });
+  }
+
+  // ============================================================
+  // FETCHERS — trial-wide only (always AGGREGATE_LABEL), same field names
+  // and query shape as farmer-portal-template.html's own fetchers. Current
+  // weight is deliberately NOT shown on this page — unlike ADG/cost/
+  // abatement, there is no pre-computed trial-wide "current weight" row in
+  // OptiWeigh_Cattle_Weights (that layer is raw per-animal data; only
+  // Economics/Emissions get a computed AGGREGATE_LABEL aggregate row) —
+  // showing an averaged-by-Claude weight figure here would be exactly the
+  // kind of unearned number this project has otherwise been careful to
+  // avoid.
+  // ============================================================
+  function fetchGwp(){
+    return q(BENCHMARKS_URL, { where: "metric_name='METHANE_GWP100_AR5'", outFields: "metric_value", f: "json" }).then(function(data){
+      if (data.features && data.features.length > 0) GWP = data.features[0].attributes.metric_value;
+    }).catch(function(err){ console.error('GWP lookup failed, using default 28:', err); });
+  }
+  function fetchTrialEcon(){
+    return q(ECON_URL, {
+      where: "farm_name='" + AGGREGATE_LABEL + "' AND treatment IN ('seafeed','control')",
+      outFields: "treatment,cumulative_ch4_abated_kg_per_head,representative_head_count,weight_gain_kg_per_head,days_of_data,cost_per_kg_gain_aud,calculation_date",
+      orderByFields: "calculation_date DESC", resultRecordCount: "10", f: "json"
+    }).then(function(data){
+      var latest = {};
+      data.features.forEach(function(f){ var t = f.attributes.treatment; if (!latest[t]) latest[t] = f.attributes; });
+      return latest;
+    });
+  }
+  function fetchTrialEmissions(){
+    return q(EMISSIONS_URL, {
+      where: "treatment='seafeed' AND farm_name='" + AGGREGATE_LABEL + "'",
+      outFields: "abatement_rate,record_date", orderByFields: "record_date DESC", resultRecordCount: "1", f: "json"
+    }).then(function(data){ return data.features.length ? data.features[0].attributes : null; });
+  }
+
+  // ============================================================
+  // FARM PICKER — see the header comment above for the full security
+  // model this deliberately does and doesn't provide (soft deterrent
+  // only, not real access control; farmer-portal-template.html itself has
+  // no enforcement of its own). Populates the dropdown from FARMS, reveals
+  // the passcode field once a farm is chosen, validates on submit and
+  // redirects. Enter key in the passcode field submits the same as
+  // clicking the button.
+  // ============================================================
+  var farmSelectEl = document.getElementById('farm-select');
+  FARMS.forEach(function(f){
+    var opt = document.createElement('option');
+    opt.value = f.name;
+    opt.textContent = f.name;
+    farmSelectEl.appendChild(opt);
+  });
+
+  var passcodeRowEl = document.getElementById('passcode-row');
+  var passcodeInputEl = document.getElementById('farm-passcode');
+  var errorEl = document.getElementById('picker-error');
+  var goBtnEl = document.getElementById('farm-go-btn');
+
+  farmSelectEl.addEventListener('change', function(){
+    errorEl.textContent = '';
+    passcodeInputEl.value = '';
+    passcodeRowEl.style.display = farmSelectEl.value ? 'flex' : 'none';
+    if (farmSelectEl.value) passcodeInputEl.focus();
+  });
+
+  function attemptGo(){
+    var selected = farmSelectEl.value;
+    if (!selected) { errorEl.textContent = 'Choose your farm first.'; return; }
+    var farm = FARMS.filter(function(f){ return f.name === selected; })[0];
+    if (!farm) { errorEl.textContent = 'Unknown farm.'; return; }
+    if (passcodeInputEl.value.trim() !== farm.passcode) {
+      errorEl.textContent = 'That passcode doesn’t match. Check with Jono if you’re not sure of yours.';
+      return;
+    }
+    errorEl.textContent = '';
+    window.location.href = 'farmer-portal-template.html?farm=' + encodeURIComponent(farm.name);
+  }
+  goBtnEl.addEventListener('click', attemptGo);
+  passcodeInputEl.addEventListener('keydown', function(e){ if (e.key === 'Enter') attemptGo(); });
+
+  // ============================================================
+  // INIT
+  // ============================================================
+  Promise.all([
+    fetchGwp(),
+    fetchTrialEcon(),
+    fetchTrialEmissions()
+  ]).then(function(results){
+    var econ = results[1], emissions = results[2];
+    var seafeedEcon = econ.seafeed, controlEcon = econ.control;
+
+    // --- Treatment vs control (hero) ---
+    var adgEl = document.getElementById('kpi-adg');
+    var adgCardEl = document.getElementById('kpi-adg-card');
+    var adgBadgeEl = document.getElementById('kpi-adg-badge');
+    if (seafeedEcon && controlEcon &&
+        seafeedEcon.weight_gain_kg_per_head != null && controlEcon.weight_gain_kg_per_head != null &&
+        seafeedEcon.days_of_data && controlEcon.days_of_data) {
+      var adgDaysOfData = Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data);
+      var diffGramsPerDay = ((seafeedEcon.weight_gain_kg_per_head - controlEcon.weight_gain_kg_per_head) / adgDaysOfData) * 1000;
+      var controlGPerDay = (controlEcon.weight_gain_kg_per_head / adgDaysOfData) * 1000;
+      if (controlGPerDay > 0) {
+        var pctAdvantage = (diffGramsPerDay / controlGPerDay) * 100;
+        adgEl.textContent = (pctAdvantage >= 0 ? '+' : '') + pctAdvantage.toFixed(1) + '%';
+      } else {
+        adgEl.textContent = (diffGramsPerDay >= 0 ? '+' : '') + Math.round(diffGramsPerDay) + ' g/day';
+      }
+      var adgAhead = diffGramsPerDay >= 0;
+      adgEl.style.color = adgAhead ? MINT : RED;
+      adgCardEl.style.borderLeftColor = adgAhead ? MINT : RED;
+      adgBadgeEl.textContent = (adgAhead ? '▲ Ahead of Control' : '▼ Behind Control');
+      adgBadgeEl.className = 'pp-kpi-badge ' + (adgAhead ? 'ahead' : 'behind');
+      adgBadgeEl.style.display = 'inline-flex';
+    } else {
+      adgEl.textContent = '–';
+    }
+
+    // --- Cost of production (split) ---
+    document.getElementById('kpi-cop-seafeed').textContent = (seafeedEcon && seafeedEcon.cost_per_kg_gain_aud != null)
+      ? '$' + seafeedEcon.cost_per_kg_gain_aud.toFixed(2) : '–';
+    document.getElementById('kpi-cop-control').textContent = (controlEcon && controlEcon.cost_per_kg_gain_aud != null)
+      ? '$' + controlEcon.cost_per_kg_gain_aud.toFixed(2) : '–';
+    document.getElementById('kpi-cop-note').textContent = (seafeedEcon && seafeedEcon.cost_per_kg_gain_aud != null)
+      ? '$/kg liveweight gain, trial-to-date' : 'Not enough data yet';
+
+    // --- Methane abatement ---
+    if (emissions && emissions.abatement_rate != null) {
+      document.getElementById('kpi-abatement').textContent = emissions.abatement_rate.toFixed(1) + '%';
+    } else {
+      document.getElementById('kpi-abatement').textContent = '–';
+    }
+
+    // --- Cumulative abatement + CO2-e + illustrative value (formula from
+    //     farms-illustrative-carbon-value.html, same as farmer-portal-
+    //     template.html's own cumulative card). ---
+    if (seafeedEcon && seafeedEcon.cumulative_ch4_abated_kg_per_head != null && seafeedEcon.representative_head_count != null) {
+      var totalKgCh4 = seafeedEcon.cumulative_ch4_abated_kg_per_head * seafeedEcon.representative_head_count;
+      var totalTonnesCo2e = (totalKgCh4 * GWP) / 1000;
+      var illustrativeValue = totalTonnesCo2e * REFERENCE_PRICE_AUD_PER_TONNE;
+      document.getElementById('cum-ch4').textContent = Math.round(totalKgCh4).toLocaleString() + ' kg';
+      document.getElementById('cum-co2e').textContent = totalTonnesCo2e.toLocaleString(undefined, { maximumFractionDigits: 1 }) + ' t CO2-e';
+      document.getElementById('cum-value').textContent = '$' + illustrativeValue.toLocaleString(undefined, { maximumFractionDigits: 0 });
+    }
+
+    document.getElementById('pp-status').innerHTML = '<span class="live">Live data</span>, updated ' + new Date().toLocaleDateString();
+  }).catch(function(err){
+    document.getElementById('pp-status').textContent = 'Live data unavailable right now';
+    console.error(err);
+  });
+
+})();
+</script>
+
+</body>
+</html>
