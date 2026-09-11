@@ -373,9 +373,13 @@
     if (seafeedEcon && controlEcon &&
         seafeedEcon.weight_gain_kg_per_head != null && controlEcon.weight_gain_kg_per_head != null &&
         seafeedEcon.days_of_data && controlEcon.days_of_data) {
-      var adgDaysOfData = Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data);
-      var diffGramsPerDay = ((seafeedEcon.weight_gain_kg_per_head - controlEcon.weight_gain_kg_per_head) / adgDaysOfData) * 1000;
-      var controlGPerDay = (controlEcon.weight_gain_kg_per_head / adgDaysOfData) * 1000;
+      // 2026-09-02 fix: each mob's own days_of_data for its own rate, not
+      // a shared min() — a shared denominator inflates whichever mob has
+      // been running longer (Bowood's SeaFeed vs Control start dates are
+      // ~33 days apart, a gap that never closes).
+      var seafeedGPerDay = (seafeedEcon.weight_gain_kg_per_head / seafeedEcon.days_of_data) * 1000;
+      var controlGPerDay = (controlEcon.weight_gain_kg_per_head / controlEcon.days_of_data) * 1000;
+      var diffGramsPerDay = seafeedGPerDay - controlGPerDay;
       if (controlGPerDay > 0) {
         var pctAdvantage = (diffGramsPerDay / controlGPerDay) * 100;
         adgEl.textContent = (pctAdvantage >= 0 ? '+' : '') + pctAdvantage.toFixed(1) + '%';
