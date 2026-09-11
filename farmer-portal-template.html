@@ -2,7 +2,7 @@
 <html lang="en-AU">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <!-- 8/12 polish pass — this is a private, unlisted per-farmer link (see
      "Private link — not for sharing" in the header), so it should never
      turn up in a search engine even if a link leaks. theme-color tints
@@ -255,8 +255,16 @@
   review): two new decision-support features, both reading data already
   live on this page.
 
-  1. SALE READINESS (new card, between the KPI row and Lick block supply).
-     Answers "when will this mob hit sale weight" per treatment, using each
+  1. SALE READINESS (REMOVED 2026-09-11, Jono's call — "isn't appropriate
+     yet" as a number to put in front of a farmer. The card and its render
+     function are gone; the Gompertz model and reasoning below are kept
+     as-is because daysToTargetGompertz() is still live and doing real work
+     in the "Plan ahead" calculator further down this file — read the rest
+     of this note for that model's own justification, just mentally drop
+     "the live Sale Readiness card" and read "the Plan calculator"
+     wherever it's mentioned below.)
+     Originally: a card, between the KPI row and Lick block supply,
+     answering "when will this mob hit sale weight" per treatment, using each
      treatment's own live current weight (rolling_weight_14d) and own
      trial-to-date growth rate (the same Economics-based ADG figure the KPI
      card and calculator already use, kept consistent rather than
@@ -346,6 +354,58 @@
   - Alert banner now breaks into one bullet per item once there's more
     than one (reorder + ADG warnings can now co-occur) instead of one
     run-on " · "-joined sentence — easier to triage at a glance.
+
+  8/24 pass — mobile-app-style bottom tab bar (Jono's request: "optimise
+  this site to act almost as a mobile phone application... widgets clear,
+  easy to understand, readable for phone screens"). Researched top mobile
+  app interfaces first, as instructed, before touching any code:
+  touch-target minimums (44pt iOS / 48dp Android, 8-16px spacing), the
+  thumb-zone principle (primary actions belong in the bottom ~40% of the
+  screen), bottom tab bars as the standard pattern for 3-5 top-level
+  destinations, Robinhood/Revolut-style card modularity, and the 2026
+  consensus toward restraint/clarity over decoration. The single biggest
+  lever for "feels like an app, not a scrolling document" turned out to
+  be the fixed bottom tab bar itself, so that's the structural change
+  here — everything else on the page (card system, colours, KPI
+  hierarchy) was already following the same design language and didn't
+  need to change.
+
+  What changed:
+  - Split the page into four tab panels behind a fixed bottom tab bar:
+    Results (Your results KPI grid + How you compare + Your
+    contribution), Action (Sale readiness + Lick block supply), Trends
+    (the four trend charts), Plan (the calculator). Grouped by the same
+    "what does a farmer actually come here to check" logic as the 8/10
+    reorder above, just split into screens instead of one long scroll.
+  - Header and the conditional alert banner stay GLOBAL, above all four
+    tabs — an overdue reorder or ADG warning shouldn't be sitting inside
+    a tab a farmer hasn't opened. The Action tab additionally gets a
+    small red badge dot (reusing the same reorderStatuses/adgWarnings
+    detection the alert banner already computes) so there's a visible
+    cue to open that tab even before reading the banner text.
+  - viewport-fit=cover added to the viewport meta tag so the tab bar can
+    read env(safe-area-inset-bottom) and sit clear of the home-indicator
+    area on notched phones, with the page's own bottom padding increased
+    to match so the last card in any tab isn't hidden behind the bar.
+  - Chart.js sizes a canvas from its container's rendered dimensions at
+    creation time, and the Trends tab is hidden (display:none) at first
+    load — a chart built while hidden would render blank or squished.
+    Rather than restructure the fetch-then-render pipeline to defer
+    chart creation, each chart's Chart.js instance is now kept
+    (chartInstances, see CONFIG) and .resize()'d the moment its tab is
+    opened, which re-reads the now-visible container's real size without
+    rebuilding the chart or re-fetching data.
+  - No fetch, formula, or data-shape changes in this pass — same
+    reasoning as the 8/12 pass above, this is a navigation/layout change
+    only.
+
+  8/24 fix (Jono's report, spotted while checking the tab-bar pass above
+  on a narrow screen): the hero ADG card's value ("+23.4%" etc) was a
+  fixed 48px with no small-screen scaling, so on a genuinely phone-narrow
+  viewport it could overflow the card's right edge — no spaces in the
+  string means no wrap opportunity. Switched to clamp(28px, 8.5vw, 48px)
+  so it scales fluidly with viewport width instead, plus overflow-wrap as
+  a fallback. See .pp-kpi-hero .pp-kpi-value's own comment for the detail.
 -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
@@ -407,6 +467,13 @@
   }
   .pp-kpi-card, .pp-cumulative-card { background: var(--surface-sunken); }
   .pp-card { background: var(--surface-card); border: 1px solid var(--border-subtle); }
+  /* 8/12 fix (Jono's request — "Plan ahead" was tucked hard against "Your
+     contribution" above it): every other section-ending element on this
+     page carries its own margin-bottom:20px (.pp-kpi-grid, .pp-chart-grid,
+     .pp-compare-card, .pp-reorder-card...) but .pp-cumulative-card never
+     got one, so it was the one card on the page with no gap before the
+     next section label. Matches the same 20px rhythm as everywhere else. */
+  .pp-cumulative-card { margin-bottom: 20px; }
 
   /* ---- Header: the page's one deliberate contrast zone (dark masthead
      vs light body), tied to a real structural boundary rather than
@@ -472,7 +539,22 @@
   .pp-kpi-hero { grid-column: span 2; }
   @media (max-width: 720px) { .pp-kpi-hero { grid-column: span 1; } }
   .pp-kpi-hero .pp-kpi-label { font-size: 12.5px; }
-  .pp-kpi-hero .pp-kpi-value { font-size: 48px; }
+  /* 8/24 fix (Jono's report, mobile pass — "ADG figure and % sign don't
+     scale, slightly over the area when the screen size is small"): this
+     was a fixed 48px regardless of card width. Below the 720px breakpoint
+     above, .pp-kpi-hero drops to a single ~220-320px grid column, and a
+     value like "+23.4%" at 48px bold Tahoma is wider than that column's
+     usable width once card padding is subtracted — with no spaces in the
+     string, it has no break opportunity, so it just overflows the card's
+     right edge instead of wrapping. clamp() makes the size fluid with the
+     viewport instead of a fixed number, so it shrinks continuously as the
+     screen narrows (8.5vw) rather than needing more fixed breakpoints,
+     with a 28px floor that stays legible on the narrowest phones and the
+     original 48px kept as the ceiling so nothing changes on desktop/
+     tablet. overflow-wrap is a belt-and-braces fallback in case any
+     future value is long enough to still not fit even at the 28px floor —
+     forces a break rather than a silent overflow. */
+  .pp-kpi-hero .pp-kpi-value { font-size: clamp(28px, 8.5vw, 48px); overflow-wrap: anywhere; }
 
   /* 8/12 polish (Jono's request — "figures I want to see as a farmer
      first up in contrasting colours"): the hero ADG card gets a dynamic
@@ -499,6 +581,19 @@
   .pp-chart-box { position: relative; height: 260px; }
   .pp-chart-box canvas { width: 100% !important; height: 100% !important; }
   .pp-chart-empty { font-size: 12px; color: var(--text-muted); text-align: center; padding: 40px 0; }
+  .pp-chart-caption { font-size: 11px; color: var(--text-muted); margin: 8px 0 0; text-align: center; }
+
+  /* 2026-09-11 addition — report archive tab rows. */
+  .pp-report-row { display: flex; align-items: flex-start; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--border-subtle); }
+  .pp-report-row:last-child { border-bottom: none; }
+  .pp-report-icon { flex: none; width: 36px; height: 36px; border-radius: 8px; background: var(--surface-sunken); display: flex; align-items: center; justify-content: center; }
+  .pp-report-icon svg { width: 18px; height: 18px; stroke: var(--tf-seafeed); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .pp-report-body { flex: 1; min-width: 0; }
+  .pp-report-title { font-family: var(--font-display); font-size: 13.5px; font-weight: 700; color: var(--text-heading); margin: 0 0 3px; }
+  .pp-report-meta { font-size: 11.5px; color: var(--text-muted); margin: 0; }
+  .pp-report-notes { font-size: 12px; color: var(--text-muted); margin: 6px 0 0; }
+  .pp-report-dl { flex: none; align-self: center; font-family: var(--font-display); font-size: 12px; font-weight: 700; color: var(--tf-seafeed); background: rgba(58,169,137,0.1); border-radius: 8px; padding: 8px 14px; text-decoration: none; white-space: nowrap; }
+  .pp-report-dl:hover { background: rgba(58,169,137,0.18); }
 
   .pp-compare-card { margin-bottom: 20px; }
   .pp-compare-row { margin-bottom: 12px; }
@@ -541,7 +636,7 @@
      positive-status strip (same visual language as the red alert banner
      above, just the good-news equivalent) so it reads with the same
      immediacy a problem would, not less. */
-  .pp-sale-advantage { display: flex; align-items: center; gap: 8px; background: rgba(58,169,137,0.08); border: 1px solid rgba(58,169,137,0.24); border-radius: var(--radius-md); padding: 10px 16px; margin: 0 0 16px 0; font-family: var(--font-display); font-size: 15px; font-weight: 700; color: var(--tf-seafeed); }
+  /* .pp-sale-advantage removed 2026-09-11 with the Sale Readiness card — see that card's HTML comment. */
 
   /* 8/10 rebuild — embedded economic feasibility calculator. */
   .pp-calc-copy { font-size: 13px; color: var(--text-muted); margin: 0 0 18px 0; }
@@ -588,6 +683,61 @@
     .pp-kpi-card, .pp-card, .pp-cumulative-card, .pp-alert-banner { box-shadow: none; break-inside: avoid; }
     .pp-calc-help-link { display: none; }
   }
+
+  /* ============ MOBILE APP-STYLE BOTTOM TAB BAR ============
+     8/24 addition — see header comment's 8/24 entry for the full research
+     basis and reasoning. Four destinations (Results/Action/Trends/Plan),
+     fixed to the bottom of the viewport — mobile app research consistently
+     points to a bottom tab bar as the single biggest "feels like an app"
+     signal, and keeps primary navigation in the thumb-reachable zone on a
+     phone rather than requiring a scroll back to the top. */
+  .pp-tab-panel { display: none; }
+  .pp-tab-panel.active { display: block; }
+
+  /* Extra bottom clearance so the last card in any tab isn't hidden behind
+     the fixed bar — covers the bar's own height plus the home-indicator
+     safe area on notched phones (env() needs viewport-fit=cover, set on
+     the meta tag in <head>; falls back to 0 on devices without a notch). */
+  .pp-page { padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+
+  .pp-tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+    display: flex; justify-content: space-around;
+    background: var(--tf-navy-900);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -2px 10px rgba(4,18,33,0.2);
+  }
+  /* Touch-target sizing per iOS/Android minimums (44pt/48dp) researched
+     for this pass — min-height 48px with generous horizontal flex gives
+     each button a comfortably tappable area even on a narrow phone. */
+  .pp-tab-btn {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    background: none; border: none; cursor: pointer;
+    min-width: 44px; min-height: 50px; padding: 6px 4px;
+    font-family: var(--font-body); font-size: 10.5px; font-weight: 700;
+    color: rgba(255,255,255,0.5);
+    text-transform: uppercase; letter-spacing: 0.03em;
+    position: relative;
+  }
+  .pp-tab-btn svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .pp-tab-btn.active { color: var(--tf-mint-400); }
+  /* Small red dot on the Action tab when there's a reorder/ADG alert to
+     see — reuses the same detection the alert banner already computes,
+     so a farmer gets a cue to open that tab even before reading the
+     banner text on the Results tab. */
+  .pp-tab-badge {
+    position: absolute; top: 4px; right: calc(50% - 20px);
+    width: 8px; height: 8px; border-radius: 50%; background: var(--tf-red);
+    border: 1.5px solid var(--tf-navy-900); display: none;
+  }
+  .pp-tab-badge.show { display: block; }
+
+  @media print {
+    .pp-tabbar { display: none; }
+    .pp-tab-panel { display: block !important; }
+    .pp-page { padding-bottom: 0; }
+  }
 </style>
 </head>
 <body>
@@ -619,6 +769,15 @@
     </svg>
     <p class="pp-alert-text" id="pp-alert-text"></p>
   </div>
+
+  <!-- ============ TAB PANEL: RESULTS ============
+       8/24 addition — first of four tab panels behind the bottom tab bar
+       (see header comment). "Is it working for my animals" is still the
+       first question a producer has, so this tab groups the KPI row, the
+       farm-vs-trial comparison, and cumulative contribution — everything
+       that answers "how am I doing" in one screen, no reorder/action
+       items or charts mixed in. -->
+  <div class="pp-tab-panel active" id="tab-results">
 
   <!-- ============ YOUR RESULTS ============
        8/10 reorder (Jono's request — farmer's-perspective redesign): "is
@@ -668,45 +827,112 @@
     </div>
   </div>
 
-  <!-- ============ SALE READINESS ============
-       8/12 addition (Jono's request — see header comment for the full
-       Gompertz growth-curve reasoning). Sits right after "your results" —
-       a direct extension of "is it working" into "what does that mean for
-       my sale date" — and ahead of Lick block supply, the page's other
-       actionable card. -->
-  <p class="pp-section-label">Sale readiness</p>
-  <div class="pp-card pp-reorder-card">
-    <p class="pp-card-title">Projected time to target weight</p>
-    <p class="pp-calc-copy" id="sale-intro">Projected from each treatment's own current weight and growth rate, using a growth-curve model that slows as animals near their mature size, not a straight-line guess.</p>
-    <p class="pp-sale-advantage" id="sale-advantage" style="display:none;"></p>
-    <div class="pp-reorder-grid">
+  <!-- ============ HOW YOU COMPARE ============ -->
+  <p class="pp-section-label">How you compare</p>
+  <div class="pp-card pp-compare-card">
+    <p class="pp-card-title">Your farm vs trial average</p>
+    <div class="pp-compare-row">
+      <div class="pp-compare-labels">
+        <span>ADG uplift</span>
+        <span id="compare-adg-label">&ndash;</span>
+      </div>
+      <div class="pp-compare-track"><div class="pp-compare-fill" id="compare-adg-fill" style="width:0%;" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="ADG uplift, this farm vs trial average"></div></div>
+    </div>
+    <div class="pp-compare-row">
+      <div class="pp-compare-labels">
+        <span>Methane abatement</span>
+        <span id="compare-abatement-label">&ndash;</span>
+      </div>
+      <div class="pp-compare-track"><div class="pp-compare-fill" id="compare-abatement-fill" style="width:0%;" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Methane abatement, this farm vs trial average"></div></div>
+    </div>
+  </div>
+
+  <!-- ============ YOUR CONTRIBUTION ============ -->
+  <p class="pp-section-label">Your contribution</p>
+  <div class="pp-cumulative-card">
+    <p class="pp-cumulative-title">Cumulative abatement to date</p>
+    <div class="pp-cumulative-row">
       <div>
-        <p class="pp-reorder-treatment pp-seafeed-value">Treatment</p>
-        <div class="pp-reorder-stats">
-          <div><span class="pp-reorder-stat-label">Projected date</span><span class="pp-reorder-stat-value pp-seafeed-value" id="sale-sf-date">&ndash;</span></div>
-          <div><span class="pp-reorder-stat-label">Days to go</span><span class="pp-reorder-stat-value pp-seafeed-value" id="sale-sf-days">&ndash;</span></div>
-        </div>
-        <p class="pp-kpi-note" id="sale-sf-note"></p>
+        <p class="pp-cumulative-value" id="cum-ch4">&ndash;</p>
+        <p class="pp-cumulative-sub">methane (CH4) abated since trial start</p>
       </div>
       <div>
-        <p class="pp-reorder-treatment">Control</p>
-        <div class="pp-reorder-stats">
-          <div><span class="pp-reorder-stat-label">Projected date</span><span class="pp-reorder-stat-value" id="sale-ct-date">&ndash;</span></div>
-          <div><span class="pp-reorder-stat-label">Days to go</span><span class="pp-reorder-stat-value" id="sale-ct-days">&ndash;</span></div>
-        </div>
-        <p class="pp-kpi-note" id="sale-ct-note"></p>
+        <p class="pp-cumulative-value" id="cum-co2e">&ndash;</p>
+        <p class="pp-cumulative-sub">CO2-equivalent, GWP100 basis</p>
+      </div>
+      <div>
+        <p class="pp-cumulative-value" id="cum-value">&ndash;</p>
+        <p class="pp-cumulative-sub">illustrative value at $32.50/t midpoint (not an ACCU credit)</p>
       </div>
     </div>
-    <p class="pp-calc-footnote" id="sale-footnote"></p>
+  </div>
+
+  </div><!-- /tab-results -->
+
+  <!-- ============ TAB PANEL: ACTION ============
+       8/24 addition — "do I need to DO anything right now" grouped into
+       its own tab: lick block supply is the page's clearest time-sensitive,
+       actionable card (same reasoning as the 8/10 reorder above), so it
+       gets a tab a farmer can jump straight to. The Action tab button
+       carries a small red badge dot (wired further down in the script)
+       whenever the reorder card or an ADG warning would have triggered the
+       alert banner, so there's a cue to open this tab even before reading
+       the banner text on Results.
+
+       2026-09-11 update: the Sale Readiness card (projected date to reach
+       480kg, via the Gompertz growth curve) has been REMOVED from this tab
+       per Jono's call — not accurate/mature enough to put in front of a
+       farmer as a real decision-support number yet. The daysToTargetGompertz()
+       model itself is untouched and still lives on below (search the
+       function name) — it's still doing real work in the Plan tab's own
+       calculator, just no longer surfaced as a standalone "when do I sell"
+       projection here. Replaced with a Data check-in card (below) answering
+       a genuinely useful, lower-stakes question instead — see its own
+       comment. -->
+  <div class="pp-tab-panel" id="tab-action">
+
+  <!-- ============ DATA CHECK-IN ============
+       2026-09-11 addition, replacing the Sale Readiness card (Jono's call —
+       "isn't appropriate yet", removed below the Lick block supply card's
+       own comment explains why). This answers a different but equally
+       genuine "do I need to do anything" question: is the trial's own data
+       still flowing? OptiWeigh sync has stalled on this farm before (see
+       the header comment's diagnostic history), and there's no other cue
+       on the page that would tell a farmer or Jono that a feed/weigh
+       station has gone quiet, other than sitting with the Trends charts
+       and noticing they've stopped moving. Reads the same weightHistory/
+       lickBlockHistory already fetched for the Trends charts below — no
+       extra query. Reuses the page's existing .stale styling convention
+       (see .pp-kpi-note.stale, already used by the reorder card). -->
+  <p class="pp-section-label">Data check-in</p>
+  <div class="pp-card pp-reorder-card">
+    <p class="pp-card-title">Is your data still coming through?</p>
+    <p class="pp-calc-copy">When each data source last updated for this farm. A big gap usually means a weigh station or feeder has stopped reporting, not that anything's wrong on farm.</p>
+    <div class="pp-reorder-grid">
+      <div>
+        <p class="pp-reorder-treatment">Weight readings</p>
+        <div class="pp-reorder-stats">
+          <div><span class="pp-reorder-stat-label">Treatment</span><span class="pp-reorder-stat-value pp-seafeed-value" id="checkin-weight-sf">&ndash;</span></div>
+          <div><span class="pp-reorder-stat-label">Control</span><span class="pp-reorder-stat-value" id="checkin-weight-ct">&ndash;</span></div>
+        </div>
+        <p class="pp-kpi-note" id="checkin-weight-note"></p>
+      </div>
+      <div>
+        <p class="pp-reorder-treatment">Lick block usage</p>
+        <div class="pp-reorder-stats">
+          <div><span class="pp-reorder-stat-label">Last synced</span><span class="pp-reorder-stat-value" id="checkin-lick">&ndash;</span></div>
+        </div>
+        <p class="pp-kpi-note" id="checkin-lick-note"></p>
+      </div>
+    </div>
   </div>
 
   <!-- ============ LICK BLOCK SUPPLY ============
-       8/10 reorder (Jono's request): moved from near the bottom of the
-       page to right after the farmer's own results — this is the only
-       genuinely actionable, time-sensitive card on the page (58 blocks/
-       pallet, 2 pallets/order). SeaFeed and Control tracked as separate
-       countdowns since they're ordered as separate pallets, not a shared
-       stock pool. Starts empty until at least one order is logged in
+       8/10 addition (Jono's request): the only genuinely actionable,
+       time-sensitive card on the page (58 blocks/pallet, 2 pallets/
+       order). SeaFeed and Control tracked as separate countdowns since
+       they're ordered as separate pallets, not a shared stock pool.
+       Starts empty until at least one order is logged in
        LEL_Lick_Block_Orders — see that table's own note in reorder-hint. -->
   <p class="pp-section-label">Lick block supply</p>
   <div class="pp-card pp-reorder-card">
@@ -733,25 +959,13 @@
     </div>
   </div>
 
-  <!-- ============ HOW YOU COMPARE ============ -->
-  <p class="pp-section-label">How you compare</p>
-  <div class="pp-card pp-compare-card">
-    <p class="pp-card-title">Your farm vs trial average</p>
-    <div class="pp-compare-row">
-      <div class="pp-compare-labels">
-        <span>ADG uplift</span>
-        <span id="compare-adg-label">&ndash;</span>
-      </div>
-      <div class="pp-compare-track"><div class="pp-compare-fill" id="compare-adg-fill" style="width:0%;" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="ADG uplift, this farm vs trial average"></div></div>
-    </div>
-    <div class="pp-compare-row">
-      <div class="pp-compare-labels">
-        <span>Methane abatement</span>
-        <span id="compare-abatement-label">&ndash;</span>
-      </div>
-      <div class="pp-compare-track"><div class="pp-compare-fill" id="compare-abatement-fill" style="width:0%;" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Methane abatement, this farm vs trial average"></div></div>
-    </div>
-  </div>
+  </div><!-- /tab-action -->
+
+  <!-- ============ TAB PANEL: TRENDS ============
+       8/24 addition — the four trend charts, unchanged in content, just
+       moved to their own tab so the Results tab stays a single-screen
+       "how am I doing" snapshot rather than a long scroll into charts. -->
+  <div class="pp-tab-panel" id="tab-trends">
 
   <!-- ============ TRENDS OVER TIME ============ -->
   <p class="pp-section-label">Trends over time</p>
@@ -772,33 +986,32 @@
       <p class="pp-card-title">Cost of production trend</p>
       <div class="pp-chart-box"><canvas id="chart-cop" role="img" aria-label="Cost of production trend, Treatment vs Control"></canvas></div>
       <p class="pp-chart-empty" id="chart-cop-empty" style="display:none;">No cost-of-production readings recorded yet.</p>
+      <!-- 2026-09-11 addition — states the chart's real start date plainly
+           instead of letting it look like a broken/incomplete trial record.
+           Cost per kg of gain isn't logged before this farm's cost tracking
+           began (see fetchCostHistory()'s own comment); this line makes
+           that a stated fact about the record, not a silent gap a farmer
+           has to notice and wonder about themselves. Text set dynamically
+           in render() from the actual earliest plotted date, not
+           hardcoded, so it stays correct as more history backfills in. -->
+      <p class="pp-chart-caption" id="chart-cop-caption"></p>
     </div>
     <div class="pp-card">
       <p class="pp-card-title">Lick block usage over time</p>
       <div class="pp-chart-box"><canvas id="chart-lick" role="img" aria-label="Lick block usage over time, Treatment vs Control"></canvas></div>
-      <p class="pp-chart-empty" id="chart-lick-empty" style="display:none;">No usage history yet. This builds up from 10/8 onward.</p>
+      <p class="pp-chart-empty" id="chart-lick-empty" style="display:none;">No usage history yet.</p>
+      <p class="pp-chart-caption" id="chart-lick-caption"></p>
     </div>
   </div>
 
-  <!-- ============ YOUR CONTRIBUTION ============ -->
-  <p class="pp-section-label">Your contribution</p>
-  <div class="pp-cumulative-card">
-    <p class="pp-cumulative-title">Cumulative abatement to date</p>
-    <div class="pp-cumulative-row">
-      <div>
-        <p class="pp-cumulative-value" id="cum-ch4">&ndash;</p>
-        <p class="pp-cumulative-sub">methane (CH4) abated since trial start</p>
-      </div>
-      <div>
-        <p class="pp-cumulative-value" id="cum-co2e">&ndash;</p>
-        <p class="pp-cumulative-sub">CO2-equivalent, GWP100 basis</p>
-      </div>
-      <div>
-        <p class="pp-cumulative-value" id="cum-value">&ndash;</p>
-        <p class="pp-cumulative-sub">illustrative value at $32.50/t midpoint (not an ACCU credit)</p>
-      </div>
-    </div>
-  </div>
+  </div><!-- /tab-trends -->
+
+  <!-- ============ TAB PANEL: PLAN ============
+       8/24 addition — the calculator gets its own tab rather than sitting
+       at the bottom of one long scroll; matches the "occasional, forward-
+       looking planning tool" framing already given to it in the 8/10
+       comment below. -->
+  <div class="pp-tab-panel" id="tab-plan">
 
   <!-- ============ PLAN AHEAD ============
        8/10 rebuild (Jono's request): was a CTA linking out to
@@ -811,10 +1024,9 @@
        cards above, no extra query needed). Deliberately simplified vs the
        full page: one "reach a target weight" mode only, no direct/derived
        ADG toggle, no $/day vs $/kg toggle — a full link-out is offered at
-       the bottom for anyone who wants those extra options. Positioned last
-       on the page deliberately — this is an occasional, forward-looking
-       planning tool a producer reaches for when they want it, not a
-       daily-glance figure like everything above it. -->
+       the bottom for anyone who wants those extra options. This is an
+       occasional, forward-looking planning tool a producer reaches for
+       when they want it, not a daily-glance figure like Results/Action. -->
   <p class="pp-section-label">Plan ahead</p>
   <div class="pp-card pp-calc-card">
     <p class="pp-card-title">Work out your own numbers</p>
@@ -842,7 +1054,12 @@
       </div>
       <div class="pp-calc-field">
         <label for="calc-cop">Cost of production ($/kg liveweight)</label>
-        <input type="number" id="calc-cop" min="0" step="0.01" value="3.50">
+        <!-- 2026-09-11 fix (Jono's request): default changed from 3.50 to
+             1.00 — always the same static default per the header comment
+             above ("COP has no trial data source and stays a manually-
+             entered assumption"), this field is never pre-filled from farm
+             data by any script, so this literal IS the whole fix. -->
+        <input type="number" id="calc-cop" min="0" step="0.01" value="1.00">
         <a class="pp-calc-help-link" href="https://tools.mla.com.au/cop/" target="_blank" rel="noopener">Don't know this figure? Work it out with MLA's free tool &#8599;</a>
       </div>
       <div class="pp-calc-field">
@@ -861,10 +1078,62 @@
         <p class="pp-calc-result-caption" id="calc-saving-caption"></p>
       </div>
     </div>
-    <p class="pp-calc-footnote">Uses this farm's own trial-to-date Treatment uplift (falls back to the trial-wide average if this farm doesn't have enough data yet). Want more options, like feeding-period mode or a full cost breakdown? <a href="page-7-calculator.html" id="calc-full-link" target="_blank" rel="noopener">Open the full calculator</a>.</p>
+    <p class="pp-calc-footnote">Uses this farm's own trial-to-date Treatment uplift (falls back to the trial-wide average if this farm doesn't have enough data yet).</p>
   </div>
 
+  </div><!-- /tab-plan -->
+
+  <!-- ============ TAB PANEL: REPORTS ============
+       2026-09-11 addition — a report archive so a producer (or their head
+       office, e.g. Ingleby Farms for Bowood) can come back and re-download
+       any report prepared for their property at any time, rather than
+       relying on a one-off email attachment. Sourced from
+       LEL_Producer_Reports, filtered to this farm; starts empty until Jono
+       adds a row, matching the graceful-empty-state pattern used
+       throughout this portal (see fetchReports()/renderReports()). -->
+  <div class="pp-tab-panel" id="tab-reports">
+    <p class="pp-section-label">Report archive</p>
+    <div class="pp-card">
+      <p class="pp-card-title">Reports for this farm</p>
+      <div id="reports-list"></div>
+      <p class="pp-chart-empty" id="reports-empty" style="display:none;">No reports have been published for this farm yet. Reports prepared for you will appear here as soon as they're published.</p>
+    </div>
+  </div><!-- /tab-reports -->
+
 </div>
+
+<!-- ============ BOTTOM TAB BAR ============
+     8/24 addition — fixed to the viewport, four destinations matching the
+     four .pp-tab-panel sections above. Click wiring + the Action badge
+     dot are set up in the script below (search "MOBILE TAB BAR"). -->
+<nav class="pp-tabbar" role="tablist" aria-label="Portal sections">
+  <button class="pp-tab-btn active" type="button" data-tab="results" role="tab" aria-selected="true" aria-controls="tab-results">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M7 15l3.5-5 3 3 4.5-6.5"></path></svg>
+    Results
+  </button>
+  <button class="pp-tab-btn" type="button" data-tab="action" role="tab" aria-selected="false" aria-controls="tab-action">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+    Action
+    <span class="pp-tab-badge" id="tab-badge-action"></span>
+  </button>
+  <button class="pp-tab-btn" type="button" data-tab="trends" role="tab" aria-selected="false" aria-controls="tab-trends">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+    Trends
+  </button>
+  <button class="pp-tab-btn" type="button" data-tab="plan" role="tab" aria-selected="false" aria-controls="tab-plan">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg>
+    Plan
+  </button>
+  <!-- 2026-09-11 addition — report archive tab. Same pattern as the Action
+       tab's badge (count of available reports rather than "needs
+       attention", but same visual treatment). Hidden/empty-state handled
+       by renderReports() when a farm has no reports yet. -->
+  <button class="pp-tab-btn" type="button" data-tab="reports" role="tab" aria-selected="false" aria-controls="tab-reports">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>
+    Reports
+    <span class="pp-tab-badge" id="tab-badge-reports"></span>
+  </button>
+</nav>
 
 <script>
 (function(){
@@ -890,7 +1159,26 @@
   // build up from 10/8 onward (see fetchLickBlockOrders()'s own note).
   var LICK_HISTORY_URL   = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Lick_Block_Usage_History/FeatureServer/0/query";
   var LICK_ORDERS_URL    = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Lick_Block_Orders/FeatureServer/0/query";
+  // 2026-09-11 addition — report archive (Ingleby Farms' quarterly PDF
+  // reports and any future producer reports). New table, created the same
+  // way as LEL_Lick_Block_Usage_History/Orders above (AGOL "Create new
+  // layer" UI). PDFs themselves are hosted as static files on the same
+  // GitHub Pages site as every other image/asset on this project
+  // (jonathanjones-tasfarmers.github.io/lel-website/...) — file_url just
+  // points at one of those, not an AGOL attachment. Starts empty for every
+  // farm; the Reports tab hides itself gracefully until a row exists for
+  // this FARM (see fetchReports()/renderReports() below).
+  var REPORTS_URL       = "https://services6.arcgis.com/RkRGg1mAki7yG3EG/arcgis/rest/services/LEL_Producer_Reports/FeatureServer/0/query";
   var REORDER_LEAD_DAYS  = 40; // order this many days before projected run-out
+  // 8/24 addition — holds each trend chart's Chart.js instance, keyed by
+  // a short name (weight/adg/cop/lick), set at chart-creation time below.
+  // The Trends tab is hidden at first load, and Chart.js sizes a canvas
+  // from its container's rendered dimensions at creation time — a chart
+  // built into a display:none container can render blank/squished. Kept
+  // here so the tab-switch handler (search "MOBILE TAB BAR" near the
+  // bottom of this file) can call .resize() on each one the moment its
+  // tab becomes visible, without rebuilding the chart or re-fetching data.
+  var chartInstances = {};
 
   var AGGREGATE_LABEL = "All Farms (Trial Aggregate)";
   var REFERENCE_PRICE_AUD_PER_TONNE = 32.5; // matches farms-illustrative-carbon-value.html
@@ -899,8 +1187,11 @@
 
   // 8/12 addition — sale-readiness projection constants. See the header
   // comment's "8/12 pass" section for the full research/validation trail.
-  var SALE_TARGET_WEIGHT_KG = 480; // matches the calculator's own default target
-  var ASSUMED_MATURE_WEIGHT_KG = 650; // genuine assumption, not a trial measurement — see header comment
+  // SALE_TARGET_WEIGHT_KG removed 2026-09-11 with the Sale Readiness card
+  // — the Plan tab calculator has its own independent 480kg default
+  // (calc-target-weight's value, set in initFeasibilityCalculator()) and
+  // never read this constant.
+  var ASSUMED_MATURE_WEIGHT_KG = 650; // genuine assumption, not a trial measurement — see header comment, still used by the Plan tab calculator's Gompertz math
   var ADG_TREND_LOOKBACK_DAYS = 35; // for the early-warning alert, see fetchAdgTrendHistory()
 
   // 8/8 pt.2 (dashboard-design skill): the page's whole chart/KPI colour
@@ -927,6 +1218,10 @@
   }
   function daysSinceEpochMs(ms){ return (Date.now() - ms) / 86400000; }
   function fmtDate(ms){ return new Date(ms).toLocaleDateString('en-AU', { day: 'numeric', month: 'short' }); }
+  // 2026-09-11 addition — full date incl. year, for the two chart captions
+  // below (fmtDate()'s short day/month form isn't unambiguous enough for
+  // "this record starts on X", where the year matters).
+  function fmtLongDate(ms){ return new Date(ms).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }); }
 
   // ============================================================
   // FETCHERS
@@ -1035,8 +1330,12 @@
       var latest = {};
       data.features.forEach(function(f){ var t = f.attributes.treatment; if (!latest[t]) latest[t] = f.attributes; });
       if (!latest.seafeed || !latest.control || !latest.seafeed.days_of_data || !latest.control.days_of_data) return null;
-      var days = Math.min(latest.seafeed.days_of_data, latest.control.days_of_data);
-      return ((latest.seafeed.weight_gain_kg_per_head - latest.control.weight_gain_kg_per_head) / days) * 1000;
+      // 2026-09-02 fix: each mob's own days_of_data for its own rate, not
+      // a shared min() — see fetchAdgPairedHistory's comment below for
+      // the full reasoning.
+      var sfRate = (latest.seafeed.weight_gain_kg_per_head / latest.seafeed.days_of_data) * 1000;
+      var ctRate = (latest.control.weight_gain_kg_per_head / latest.control.days_of_data) * 1000;
+      return sfRate - ctRate;
     });
   }
 
@@ -1058,16 +1357,19 @@
   // as two raw per-treatment lines, a noisier, unrelated methodology to the
   // ADG vs control KPI above (which already used the Economics-based
   // formula) and to page-5-data.html's own chart — that mismatch is why the
-  // trend looked "behind"/wrong. Rewritten to match page-5-data.html's 4/8
-  // methodology exactly: LEL_Economics_Data, SeaFeed vs Control paired by
-  // exact calculation_date match, single "ADG advantage" line = (seafeed.
-  // weight_gain_kg_per_head - control.weight_gain_kg_per_head) /
-  // min(days_of_data) * 1000 — identical formula to the KPI card and the
-  // Farm page badge, so this chart can no longer disagree with them.
-  // Farm-filtered first, falls back to the trial aggregate (same pattern as
-  // fetchEconForFarm/fetchCostHistory). The inner join (only dates present
-  // in BOTH treatments) means there's nothing to leave a gap — no nulls are
-  // ever pushed into the plotted series.
+  // trend looked "behind"/wrong. Rewritten to match page-5-data.html's
+  // methodology: LEL_Economics_Data, SeaFeed vs Control paired by exact
+  // calculation_date match, single "ADG advantage" line = seafeed's own
+  // g/day rate minus control's own g/day rate, EACH from its own
+  // days_of_data (2026-09-02 fix — a shared min(days_of_data) denominator,
+  // used here until now, inflates whichever mob has been running longer
+  // whenever the two groups' start dates differ, which is common). Same
+  // formula as the KPI card above and the Farm page badge, so this chart
+  // can no longer disagree with them. Farm-filtered first, falls back to
+  // the trial aggregate (same pattern as fetchEconForFarm/fetchCostHistory).
+  // The inner join (only dates present in BOTH treatments) means there's
+  // nothing to leave a gap — no nulls are ever pushed into the plotted
+  // series.
   var ADG_CHART_START_MS = Date.UTC(2026, 5, 25); // matches page-5-data.html's trim — earliest weeks are thin, single-mob Control data
   function sqlTimestamp(ms){ return new Date(ms).toISOString().slice(0, 19).replace('T', ' '); }
   function fetchAdgPairedHistory(farmName){
@@ -1081,8 +1383,9 @@
       var dates = Object.keys(sfByDate).filter(function(d){ return ctByDate.hasOwnProperty(d); }).map(Number).sort(function(a, b){ return a - b; });
       return dates.map(function(d){
         var sf = sfByDate[d], ct = ctByDate[d];
-        var days = Math.min(sf.days_of_data, ct.days_of_data);
-        return { date: d, diff: ((sf.weight_gain_kg_per_head - ct.weight_gain_kg_per_head) / days) * 1000 };
+        var sfRate = (sf.weight_gain_kg_per_head / sf.days_of_data) * 1000;
+        var ctRate = (ct.weight_gain_kg_per_head / ct.days_of_data) * 1000;
+        return { date: d, diff: sfRate - ctRate };
       });
     });
   }
@@ -1147,6 +1450,22 @@
       orderByFields: "order_date ASC", resultRecordCount: "500", f: "json"
     }).then(function(data){ return data.features.map(function(f){ return f.attributes; }); }).catch(function(err){
       console.error('Lick block orders fetch failed (check LICK_ORDERS_URL is correct):', err);
+      return [];
+    });
+  }
+
+  // 2026-09-11 addition — report archive. Returns this farm's rows,
+  // newest first. Table starts empty for every farm (see REPORTS_URL's
+  // own comment above), so an empty array here is the normal/expected
+  // case until Jono adds the first row for a given property — not
+  // treated as an error.
+  function fetchReports(){
+    return q(REPORTS_URL, {
+      where: "farm_name='" + FARM + "'",
+      outFields: "report_title,report_period,report_date,report_type,file_url,notes",
+      orderByFields: "report_date DESC", resultRecordCount: "100", f: "json"
+    }).then(function(data){ return data.features.map(function(f){ return f.attributes; }); }).catch(function(err){
+      console.error('Report archive fetch failed (check REPORTS_URL is correct):', err);
       return [];
     });
   }
@@ -1433,9 +1752,11 @@
         seafeedEcon.weight_gain_kg_per_head != null && controlEcon.weight_gain_kg_per_head != null &&
         seafeedEcon.days_of_data && controlEcon.days_of_data &&
         seafeedEcon.cost_per_head_aud != null && controlEcon.cost_per_head_aud != null) {
-      var calcDays = Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data);
-      calcAdgUplift = (seafeedEcon.weight_gain_kg_per_head - controlEcon.weight_gain_kg_per_head) / calcDays;
-      calcIncrementalCostPerHeadDay = (seafeedEcon.cost_per_head_aud - controlEcon.cost_per_head_aud) / calcDays;
+      // 2026-09-02 fix: each mob's own days_of_data for its own rate, not
+      // a shared min() — a shared denominator inflates whichever mob has
+      // been running longer whenever the two start dates differ.
+      calcAdgUplift = (seafeedEcon.weight_gain_kg_per_head / seafeedEcon.days_of_data) - (controlEcon.weight_gain_kg_per_head / controlEcon.days_of_data);
+      calcIncrementalCostPerHeadDay = (seafeedEcon.cost_per_head_aud / seafeedEcon.days_of_data) - (controlEcon.cost_per_head_aud / controlEcon.days_of_data);
     }
 
     // Pre-fill the "business as usual" (Control) baseline inputs with this
@@ -1474,21 +1795,13 @@
       document.getElementById(id).addEventListener('input', calcFeasibility);
     });
 
-    // "Open the full calculator" carries the same pre-filled figures
-    // through via page-7-calculator.html's own applyPortalPrefill() (see
-    // that page), so switching to the full version doesn't lose context.
-    var fullLinkParams = new URLSearchParams();
-    if (controlEcon && controlEcon.representative_head_count) fullLinkParams.set('herdSize', controlEcon.representative_head_count);
-    if (cwVal != null) fullLinkParams.set('currentWeight', cwVal);
-    if (controlEcon && controlEcon.weight_gain_kg_per_head != null && controlEcon.days_of_data) {
-      var fullLinkAdg = controlEcon.weight_gain_kg_per_head / controlEcon.days_of_data;
-      if (fullLinkAdg > 0) fullLinkParams.set('adgValue', fullLinkAdg.toFixed(2));
-    }
-    // copPerKg deliberately NOT passed through — see the fix note above,
-    // same reasoning applies to the full calculator's own COP field.
-    fullLinkParams.set('farm', FARM);
-    document.getElementById('calc-full-link').href = 'page-7-calculator.html?' + fullLinkParams.toString();
-
+    // 8/12 removal (Jono's request): "Open the full calculator" link and
+    // its page-7-calculator.html?... prefill-params handoff removed —
+    // that page isn't live yet, so a link to it was a dead end for a
+    // farmer using this portal. If/when page-7-calculator.html goes live,
+    // this is the block to reinstate (see git history for the original
+    // fullLinkParams logic) alongside re-adding the <a id="calc-full-link">
+    // back into the footnote paragraph.
     calcFeasibility();
 
     fetchIndicativeSalePrice().then(function(price){
@@ -1496,6 +1809,43 @@
       document.getElementById('calc-price').value = price.toFixed(2);
       calcFeasibility();
     });
+  }
+
+  // 2026-09-11 addition — renders the Reports tab's list from
+  // fetchReports()'s result. Runs unconditionally on load (not gated
+  // behind a tab click) since the tab badge count needs to be known
+  // immediately, same as the Action tab's badge above.
+  function renderReports(reports){
+    var badge = document.getElementById('tab-badge-reports');
+    var listEl = document.getElementById('reports-list');
+    var emptyEl = document.getElementById('reports-empty');
+    if (!reports || reports.length === 0) {
+      if (badge) badge.textContent = '';
+      if (listEl) listEl.innerHTML = '';
+      if (emptyEl) emptyEl.style.display = 'block';
+      return;
+    }
+    if (badge) badge.textContent = String(reports.length);
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (!listEl) return;
+    listEl.innerHTML = reports.map(function(r){
+      var dateStr = r.report_date ? new Date(r.report_date).toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+      var period = r.report_period ? r.report_period : '';
+      var type = r.report_type ? r.report_type : 'Report';
+      var notes = r.notes ? '<p class="pp-report-notes">' + r.notes + '</p>' : '';
+      return '' +
+        '<div class="pp-report-row">' +
+          '<div class="pp-report-icon">' +
+            '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"></path><path d="M14 2v6h6"></path></svg>' +
+          '</div>' +
+          '<div class="pp-report-body">' +
+            '<p class="pp-report-title">' + (r.report_title || 'Untitled report') + '</p>' +
+            '<p class="pp-report-meta">' + [type, period, dateStr].filter(Boolean).join('  ·  ') + '</p>' +
+            notes +
+          '</div>' +
+          (r.file_url ? '<a class="pp-report-dl" href="' + r.file_url + '" target="_blank" rel="noopener">Download PDF</a>' : '') +
+        '</div>';
+    }).join('');
   }
 
   // ============================================================
@@ -1520,12 +1870,15 @@
     fetchTrialWideEmissions(),
     fetchTrialWideAdg(),
     fetchLickBlockOrders(),
-    fetchAdgTrendHistory()
+    fetchAdgTrendHistory(),
+    fetchReports()
   ]).then(function(results){
     var weight = results[1], econ = results[2], emissionsResult = results[3],
         weightHistory = results[4], adgHistory = results[5], costHistory = results[6],
         lickBlockHistory = results[7], trialEmissions = results[8], trialAdg = results[9],
-        lickBlockOrders = results[10], adgTrendHistory = results[11];
+        lickBlockOrders = results[10], adgTrendHistory = results[11], reports = results[12];
+
+    renderReports(reports);
 
     // --- Current weight (split by treatment, 7/8) ---
     // 8/10: dropped the "14-day rolling average, as at [date]" note per
@@ -1555,9 +1908,12 @@
     if (seafeedEcon && controlEcon &&
         seafeedEcon.weight_gain_kg_per_head != null && controlEcon.weight_gain_kg_per_head != null &&
         seafeedEcon.days_of_data && controlEcon.days_of_data) {
-      var adgDaysOfData = Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data);
-      var diffGramsPerDay = ((seafeedEcon.weight_gain_kg_per_head - controlEcon.weight_gain_kg_per_head) / adgDaysOfData) * 1000;
-      var controlGPerDay = (controlEcon.weight_gain_kg_per_head / adgDaysOfData) * 1000;
+      // 2026-09-02 fix: each mob's own days_of_data for its own rate, not
+      // a shared min() — a shared denominator inflates whichever mob has
+      // been running longer whenever the two start dates differ.
+      var seafeedGPerDay = (seafeedEcon.weight_gain_kg_per_head / seafeedEcon.days_of_data) * 1000;
+      var controlGPerDay = (controlEcon.weight_gain_kg_per_head / controlEcon.days_of_data) * 1000;
+      var diffGramsPerDay = seafeedGPerDay - controlGPerDay;
       if (controlGPerDay > 0) {
         var pctAdvantage = (diffGramsPerDay / controlGPerDay) * 100;
         adgEl.textContent = (pctAdvantage >= 0 ? '+' : '') + pctAdvantage.toFixed(1) + '%';
@@ -1602,77 +1958,59 @@
       document.getElementById('kpi-abatement').textContent = '–';
     }
 
-    // --- Sale readiness projection — 8/12 addition (Jono's request: "as
-    //     true a projection as possible... use existing research to apply
-    //     this weight curve"). Uses each treatment's own live current
-    //     weight and own trial-to-date growth rate (same Economics-based
-    //     ADG figure as the KPI card/calculator, kept consistent rather
-    //     than introducing a second ADG figure here) as the Gompertz
-    //     curve's starting point — see daysToTargetGompertz()'s header
-    //     comment for the model itself and ASSUMED_MATURE_WEIGHT_KG's
-    //     comment for why that assumption is surfaced, not hidden.
-    //     8/12 refinement (Jono's request — "use the ADG data that the %
-    //     figure is drawing from"): was dividing each treatment by its OWN
-    //     days_of_data, which can genuinely differ between SeaFeed and
-    //     Control (different data-completeness windows) — the "ADG vs
-    //     control" hero KPI above never does this, it always divides BOTH
-    //     treatments by the shared min(seafeedEcon.days_of_data,
-    //     controlEcon.days_of_data) so the two are compared over the exact
-    //     same window. saleAdgDaysOfData below matches that same
-    //     computation, so this projection's ADG input can't quietly
-    //     disagree with the number the hero KPI is already showing. ---
-    var saleAdgDaysOfData = (seafeedEcon && controlEcon && seafeedEcon.days_of_data && controlEcon.days_of_data)
-      ? Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data) : null;
-    function renderSaleReadiness(prefix, weightRow, econRow, treatmentLabel){
-      var dateEl = document.getElementById(prefix + '-date');
-      var daysEl = document.getElementById(prefix + '-days');
-      var noteEl = document.getElementById(prefix + '-note');
-      if (!weightRow || weightRow.rolling_weight_14d == null || !econRow || econRow.weight_gain_kg_per_head == null || !saleAdgDaysOfData) {
-        noteEl.textContent = 'Not enough data yet';
-        return null;
-      }
-      var w0 = weightRow.rolling_weight_14d;
-      var adg0 = econRow.weight_gain_kg_per_head / saleAdgDaysOfData;
-      if (w0 >= SALE_TARGET_WEIGHT_KG) {
-        dateEl.textContent = 'Reached';
-        daysEl.textContent = '–';
-        noteEl.textContent = 'Already at or above ' + SALE_TARGET_WEIGHT_KG + 'kg';
-        return { treatmentLabel: treatmentLabel, days: 0 };
-      }
-      var days = daysToTargetGompertz(w0, adg0, ASSUMED_MATURE_WEIGHT_KG, SALE_TARGET_WEIGHT_KG);
-      if (days == null) {
-        noteEl.textContent = adg0 <= 0 ? 'No growth recorded, can’t project' : 'Can’t project with current assumptions';
-        return null;
-      }
-      var targetMs = Date.now() + days * 86400000;
-      dateEl.textContent = fmtDate(targetMs);
-      daysEl.textContent = days + ' days';
-      noteEl.textContent = 'from ' + Math.round(w0) + 'kg at ' + adg0.toFixed(2) + ' kg/day today';
-      return { treatmentLabel: treatmentLabel, days: days };
+    // --- Data check-in — 2026-09-11 addition, replacing Sale Readiness in
+    //     the Action tab (see that card's HTML comment for why). Answers
+    //     "is the trial's own data still flowing" per source, using the
+    //     same weightHistory/lickBlockHistory already fetched for the
+    //     Trends charts — no extra query. Thresholds are deliberately
+    //     generous (7 days) rather than tuned to this farm's actual sync
+    //     cadence, which isn't tracked anywhere yet — the goal is to catch
+    //     a genuine multi-day stall (like the ones already diagnosed twice
+    //     on this project), not to flag normal day-to-day gaps. ---
+    var STALE_DAYS_THRESHOLD = 7;
+    function fmtDaysAgo(ms){
+      var days = Math.floor((Date.now() - ms) / 86400000);
+      if (days <= 0) return 'today';
+      if (days === 1) return '1 day ago';
+      return days + ' days ago';
     }
-    var saleSf = renderSaleReadiness('sale-sf', seafeedWeight, seafeedEcon, 'Treatment');
-    var saleCt = renderSaleReadiness('sale-ct', controlWeight, controlEcon, 'Control');
-    // 8/12 polish (Jono's request — "figures I want to see as a farmer
-    // first up"): this is the single most decision-relevant number in the
-    // whole card ("how much sooner can I sell with SeaFeed") — promoted
-    // out of the footnote sentence into its own mint-tinted stat banner
-    // (see .pp-sale-advantage's CSS comment), footnote now only carries
-    // the methodology/assumption note.
-    if (saleSf && saleCt && saleSf.days > 0 && saleCt.days > 0) {
-      var soonerDays = saleCt.days - saleSf.days;
-      var saleAdvantageEl = document.getElementById('sale-advantage');
-      if (soonerDays > 0) {
-        saleAdvantageEl.textContent = '▲ Treatment reaches ' + SALE_TARGET_WEIGHT_KG + 'kg ' + soonerDays + ' days sooner than Control at these rates';
-        saleAdvantageEl.style.display = 'flex';
-      }
+    function renderCheckinStat(elId, ms){
+      var el = document.getElementById(elId);
+      if (ms == null) { el.textContent = 'No data yet'; return { stale: true }; }
+      var days = Math.floor((Date.now() - ms) / 86400000);
+      var stale = days > STALE_DAYS_THRESHOLD;
+      el.textContent = fmtDaysAgo(ms) + ' (' + fmtDate(ms) + ')';
+      el.classList.toggle('stale', stale);
+      return { stale: stale, days: days };
     }
-    document.getElementById('sale-footnote').textContent =
-      'Projects to ' + SALE_TARGET_WEIGHT_KG + 'kg using a growth-curve model (Gompertz) that slows each animal’s growth as it nears an assumed mature weight of ' + ASSUMED_MATURE_WEIGHT_KG + 'kg, an estimate, not a trial measurement.';
+    var latestWeightByTreatment = {};
+    weightHistory.forEach(function(r){
+      var t = r.treatment_group;
+      if (!latestWeightByTreatment[t] || r.snapshot_date > latestWeightByTreatment[t]) latestWeightByTreatment[t] = r.snapshot_date;
+    });
+    var wSf = renderCheckinStat('checkin-weight-sf', latestWeightByTreatment.seafeed);
+    var wCt = renderCheckinStat('checkin-weight-ct', latestWeightByTreatment.control);
+    var weightNoteEl = document.getElementById('checkin-weight-note');
+    if (wSf.stale || wCt.stale) {
+      weightNoteEl.textContent = 'One or both mobs haven’t had a new weight reading in over a week';
+      weightNoteEl.classList.add('stale');
+    } else {
+      weightNoteEl.textContent = 'Both mobs reporting normally';
+    }
+    var latestLickDate = null;
+    lickBlockHistory.forEach(function(r){ if (latestLickDate == null || r.snapshot_date > latestLickDate) latestLickDate = r.snapshot_date; });
+    var lickCheckin = renderCheckinStat('checkin-lick', latestLickDate);
+    var lickNoteEl = document.getElementById('checkin-lick-note');
+    lickNoteEl.textContent = lickCheckin.stale ? 'No new usage reading in over a week' : 'Reporting normally';
+    if (lickCheckin.stale) lickNoteEl.classList.add('stale');
 
     // --- Farm vs trial average (ADG) ---
     if (seafeedEcon && controlEcon && seafeedEcon.days_of_data && controlEcon.days_of_data) {
-      var farmDays = Math.min(seafeedEcon.days_of_data, controlEcon.days_of_data);
-      var farmDiff = ((seafeedEcon.weight_gain_kg_per_head - controlEcon.weight_gain_kg_per_head) / farmDays) * 1000;
+      // 2026-09-02 fix: each mob's own days_of_data for its own rate, not
+      // a shared min() — see the hero KPI above for the full reasoning.
+      var farmSfGPerDay = (seafeedEcon.weight_gain_kg_per_head / seafeedEcon.days_of_data) * 1000;
+      var farmCtGPerDay = (controlEcon.weight_gain_kg_per_head / controlEcon.days_of_data) * 1000;
+      var farmDiff = farmSfGPerDay - farmCtGPerDay;
       // 8/12 fix: was missing the "g/day" unit — read as a bare number
       // ("Bowood Farm +142 · trial avg +130") next to a card whose other
       // row (methane abatement) does carry its "%" unit. Both rows should
@@ -1742,7 +2080,7 @@
         weightByDate[r.snapshot_date][r.treatment_group] = r.rolling_weight_14d;
       });
       var weightDatesArr = Object.keys(weightByDate).map(Number).sort(function(a, b){ return a - b; });
-      lineChart('chart-weight', weightDatesArr.map(fmtDate), [
+      chartInstances.weight = lineChart('chart-weight', weightDatesArr.map(fmtDate), [
         { label: 'Treatment', data: weightDatesArr.map(function(d){ return weightByDate[d].seafeed != null ? weightByDate[d].seafeed : null; }), borderColor: MINT, backgroundColor: 'transparent' },
         { label: 'Control', data: weightDatesArr.map(function(d){ return weightByDate[d].control != null ? weightByDate[d].control : null; }), borderColor: SLATE, backgroundColor: 'transparent' }
       ], 'kg');
@@ -1754,7 +2092,7 @@
     //     Shaded red for any segment where SeaFeed is behind Control, mint
     //     where it's ahead, matching page-5-data.html's own chart. ---
     if (adgHistory.rows.length) {
-      lineChart('chart-adg',
+      chartInstances.adg = lineChart('chart-adg',
         adgHistory.rows.map(function(r){ return fmtDate(r.date); }),
         [{
           // 8/12 polish: label shortened from "ADG advantage (g/day)" —
@@ -1793,17 +2131,30 @@
         costByDate[r.calculation_date][r.treatment] = r.cost_per_kg_gain_aud;
       });
       var costDates = Object.keys(costByDate).map(Number).sort(function(a, b){ return a - b; });
-      lineChart('chart-cop', costDates.map(fmtDate), [
+      chartInstances.cop = lineChart('chart-cop', costDates.map(fmtDate), [
         { label: 'Treatment', data: costDates.map(function(d){ return costByDate[d].seafeed != null ? costByDate[d].seafeed : null; }), borderColor: MINT, backgroundColor: 'transparent' },
         { label: 'Control', data: costDates.map(function(d){ return costByDate[d].control != null ? costByDate[d].control : null; }), borderColor: SLATE, backgroundColor: 'transparent' }
       ], 'aud');
+      // 2026-09-11 addition — see the caption <p>'s own HTML comment. States
+      // the record's true earliest date plainly rather than leaving a
+      // farmer to notice the chart doesn't reach back to trial start and
+      // wonder if it's broken. Genuinely earliest, not assumed: this is
+      // costDates[0] itself, the first date this farm actually has a
+      // cost_per_kg_gain_aud reading for either treatment.
+      document.getElementById('chart-cop-caption').textContent =
+        'Showing every cost reading on record for this farm, from ' + fmtLongDate(costDates[0]) + '.';
     } else { document.getElementById('chart-cop-empty').style.display = 'block'; }
 
     // --- Lick block usage over time — 8/10 rebuild (Jono's request):
     //     replaced the old per-asset snapshot bar chart with a real trend
     //     line, keyed by snapshot_date the same way the cost/weight charts
-    //     key by calculation_date. History starts 10/8, so early on this
-    //     will only show a few points — that's expected, not a bug. ---
+    //     key by calculation_date. LEL_Lick_Block_Usage_History is
+    //     append-only and was only switched on 10 August 2026 — there is
+    //     no usage-over-time trail from before that date anywhere in the
+    //     system to plot (the old per-asset snapshot layer this replaced
+    //     was purged and rebuilt every run, so it never accumulated a
+    //     history either). This chart's record genuinely cannot go back to
+    //     trial start; see the caption below rather than a code fix here. ---
     if (lickBlockHistory.length) {
       var lickByDate = {};
       lickBlockHistory.forEach(function(r){
@@ -1811,10 +2162,15 @@
         lickByDate[r.snapshot_date][r.treatment] = r.cumulative_blocks_used;
       });
       var lickDates = Object.keys(lickByDate).map(Number).sort(function(a, b){ return a - b; });
-      lineChart('chart-lick', lickDates.map(fmtDate), [
+      chartInstances.lick = lineChart('chart-lick', lickDates.map(fmtDate), [
         { label: 'Treatment', data: lickDates.map(function(d){ return lickByDate[d].seafeed != null ? lickByDate[d].seafeed : null; }), borderColor: MINT, backgroundColor: 'transparent' },
         { label: 'Control', data: lickDates.map(function(d){ return lickByDate[d].control != null ? lickByDate[d].control : null; }), borderColor: SLATE, backgroundColor: 'transparent' }
       ], 'blocks');
+      // 2026-09-11 addition — same reasoning as the COP chart's caption
+      // above: state the true earliest date on record rather than leave a
+      // silent gap. Genuinely earliest (lickDates[0]), not hardcoded.
+      document.getElementById('chart-lick-caption').textContent =
+        'Showing every usage reading on record for this farm, from ' + fmtLongDate(lickDates[0]) + '.';
     } else { document.getElementById('chart-lick-empty').style.display = 'block'; }
 
     // --- Lick block reorder forecast — 8/10 addition (Jono's request):
@@ -1935,6 +2291,11 @@
       document.getElementById('pp-alert-text').innerHTML = alertHtml;
       document.getElementById('pp-alert-banner').style.display = 'flex';
     }
+    // 8/24 addition — same alertParts signal drives a small red dot on the
+    // Action tab button, so there's a cue to open that tab even before a
+    // farmer has scrolled/read the banner text (which lives on Results).
+    var actionBadgeEl = document.getElementById('tab-badge-action');
+    if (actionBadgeEl) actionBadgeEl.classList.toggle('show', alertParts.length > 0);
 
     // --- Economic feasibility calculator — 8/10 rebuild (Jono's request):
     //     now embedded and usable inline, not just a link out. See
@@ -1947,6 +2308,40 @@
     document.getElementById('pp-status').textContent = 'Live data unavailable right now';
     console.error(err);
   });
+
+  // ============================================================
+  // MOBILE TAB BAR — 8/24 addition. Pure UI wiring, independent of the
+  // fetch/render code above (runs immediately, doesn't wait on any data).
+  // Switches which .pp-tab-panel is visible and updates the matching
+  // .pp-tab-btn's active state. On switching TO the Trends tab, resizes
+  // every stored chart instance (see chartInstances in CONFIG above) —
+  // necessary because a Chart.js chart built while its container was
+  // display:none sizes itself as 0x0, and resize() is the cheap fix
+  // rather than rebuilding the chart or re-fetching data.
+  // ============================================================
+  var tabButtons = document.querySelectorAll('.pp-tab-btn');
+  var tabPanels = document.querySelectorAll('.pp-tab-panel');
+  for (var ti = 0; ti < tabButtons.length; ti++) {
+    (function(btn){
+      btn.addEventListener('click', function(){
+        var target = btn.getAttribute('data-tab');
+        for (var bi = 0; bi < tabButtons.length; bi++) {
+          var isActive = tabButtons[bi] === btn;
+          tabButtons[bi].classList.toggle('active', isActive);
+          tabButtons[bi].setAttribute('aria-selected', isActive ? 'true' : 'false');
+        }
+        for (var pi = 0; pi < tabPanels.length; pi++) {
+          tabPanels[pi].classList.toggle('active', tabPanels[pi].id === 'tab-' + target);
+        }
+        if (target === 'trends') {
+          for (var key in chartInstances) {
+            if (chartInstances[key]) chartInstances[key].resize();
+          }
+        }
+        window.scrollTo(0, 0);
+      });
+    })(tabButtons[ti]);
+  }
 
 })();
 </script>
